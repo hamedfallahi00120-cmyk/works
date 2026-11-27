@@ -238,3 +238,68 @@ def test_context_overflow_retries_and_falls_back_cleanly(structured_analysis, ol
     assert outcome.metadata["provenance"]["model_analysis"] == "not_executed"
     assert outcome.metadata["failed_chunks"] == outcome.metadata["chunk_count"] > 0
     assert all(chunk["status"] == "failed" for chunk in outcome.metadata["chunks"])
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Known baseline defect G5/R4; remove this marker when temporal-key roles are implemented.",
+)
+def test_year_month_day_columns_are_not_measures(settings, make_workbook):
+    """G5 / R4: سال، ماه و روز are temporal keys, never summed measures.
+
+    Red until the Excel role vocabulary learns the temporal words the document
+    reader already knows (P1).
+    """
+    path = make_workbook(
+        "temporal_keys.xlsx",
+        {
+            "S": [
+                ["گزارش آزمایشی"],
+                [],
+                ["سال", "ماه", "روز", "تعداد"],
+                [1403, 1, 5, 10],
+                [1403, 2, 17, 12],
+                [1404, 1, 9, 14],
+                [1404, 2, 28, 11],
+            ]
+        },
+    )
+    analysis = ExcelIntelligenceWorkflow(settings).analyze_only(path)
+    sheet = analysis.intelligence.sheet("S")
+    columns = {column.header: column for column in sheet.columns}
+    for header in ("سال", "ماه", "روز"):
+        assert columns[header].statistical_role is DataRole.TEMPORAL_KEY
+    assert {column.header for column in sheet.measures} == {"تعداد"}
+    labels = {item.label for item in analysis.calculations}
+    for header in ("سال", "ماه", "روز"):
+        assert not any(label.endswith(f" {header}") for label in labels), (header, labels)
+
+
+def test_code_columns_stay_identifiers(settings, make_workbook):
+    """G5 / R5: two code columns stay identifiers and never become measures.
+
+    R5's duplicate-role demotion is unreachable today because parent_header is
+    always populated, so both columns already stay identifiers. This guards the
+    invariant while the role vocabulary grows in P1.
+    """
+    path = make_workbook(
+        "code_columns.xlsx",
+        {
+            "S": [
+                ["گزارش کدها"],
+                [],
+                ["کد پلاک", "کد شهرستان", "تعداد"],
+                [2184, 11, 5],
+                [2079, 12, 7],
+                [2047, 13, 9],
+                [2185, 14, 4],
+                [2071, 15, 6],
+            ]
+        },
+    )
+    analysis = ExcelIntelligenceWorkflow(settings).analyze_only(path)
+    sheet = analysis.intelligence.sheet("S")
+    columns = {column.header: column for column in sheet.columns}
+    for header in ("کد پلاک", "کد شهرستان"):
+        assert columns[header].statistical_role is DataRole.IDENTIFIER
+    assert {column.header for column in sheet.measures} == {"تعداد"}

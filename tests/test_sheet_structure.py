@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from local_office_ai.core.models import ColumnRole, TableKind, ValueKind
 from local_office_ai.excel.reader import WorkbookReader
 from local_office_ai.excel.sheet_analyzer import SheetAnalyzer, SheetGrid
@@ -157,6 +159,22 @@ def test_total_label_helper():
     assert is_total_label("Total:")
     assert not is_total_label("تعهدهای ماهانه")
     assert not is_total_label(None)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Known baseline defect G3/R3; remove this marker when total-label matching is fixed.",
+)
+def test_total_label_needs_a_word_boundary():
+    """G3 / R3: a label that merely contains جمع/کل is not a totals row.
+
+    Red until is_total_label switches to the word-boundary rule that the
+    statistics channel already uses (P0).
+    """
+    for label in ("کلانتری ۱۲", "تکلیف", "جمعیت", "کلاسه پرونده"):
+        assert not is_total_label(label), label
+    for label in ("جمع", "جمع کل", "مجموع", "Total"):
+        assert is_total_label(label), label
 
 
 def test_low_confidence_structure_is_flagged(make_workbook, settings):

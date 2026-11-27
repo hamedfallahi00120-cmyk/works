@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from local_office_ai.ui.cli import main
 
 
@@ -115,3 +117,44 @@ def test_cli_image_generation_uses_both_services(project_root, sample_path, fake
     assert "تصویر:" in captured.out
     images = list((project_root / "data" / "output" / "images").glob("*.png"))
     assert images and images[0].read_bytes().startswith(b"\x89PNG")
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Known baseline defect G11/R8; remove this marker when the output-suffix guard is implemented.",
+)
+def test_output_suffix_is_validated(make_workbook, project_root):
+    """G11 / R8: an unsupported output suffix must fail loudly.
+
+    Red until the output-format guard exists (P0-4). Today an xlsx workbook is
+    written under the .docx name, which Word cannot open.
+    """
+    source = make_workbook(
+        "costs.xlsx",
+        {
+            "هزینه‌ها": [
+                ["جدول هزینه‌های جاری"],
+                [],
+                ["ردیف", "شرح", "مبلغ", "دسته"],
+                [1, "اجاره", 1250000, "اجاره"],
+                [2, "برق", 1250000, "انرژی"],
+                [3, "اینترنت", 850000, "ارتباطات"],
+            ]
+        },
+    )
+    output = project_root / "report.docx"
+    code = main(
+        [
+            "--root",
+            str(project_root),
+            "--file",
+            str(source),
+            "--no-ai",
+            "--yes",
+            "--quiet",
+            "--output",
+            str(output),
+        ]
+    )
+    assert code != 0
+    assert not output.exists()

@@ -6,31 +6,60 @@ formatted Persian report workbook. Loan/obligation reconciliation is an optional
 module for workbooks that actually contain those columns, not the product's core.
 Optional local LLM (Ollama/Qwen) writes narrative only; optional ComfyUI image studio.
 
-## Handoff protocol (mandatory for any AI agent working here)
+## Verified handoff state and mandatory next-stage protocol
 
-This repository is a published baseline extracted from `Local-Office-AI_UI_UX_Refined.zip`
-on branch `upload/local-office-ai-ui-ux-refined`. The sample workbook
-`data/input/Book2_AI_V4_2_Monitored.xlsx` is absent, so 38 tests fail with
-"reference workbook is missing"; that is a missing asset, not a regression.
+The read-only Phase 0 audit is already complete and is recorded in
+`PHASE0_BASELINE_AUDIT.md`. **Do not repeat Phase 0, create a replacement audit, or
+restart the project from scratch.** The sanitized project handover is
+`MASTER_PROJECT_HANDOVER_PUBLIC.txt`; the live evidence ledger is
+`docs/quality_evidence.md`; the concise start instructions are
+`docs/NEXT_AGENT_START_HERE.md`.
 
-Any agent working on this repository must:
+The repository is private. The preparation baseline is on
+`fix/multisource-extraction-integrity`; the dedicated next-stage branch is
+`feature/prompt-01a-data-model-metadata` (created from the verified preparation
+branch). Never work directly on `main`.
 
-1. Inspect the entire repository first (tree, docs, tests, git history).
-2. Identify the real application architecture and entry points (`run_engine.py`,
-   `run_ui.py`, `src/local_office_ai/`) before touching code.
-3. Review dependencies (`requirements.txt`, `requirements-documents.txt`) and configuration
-   (`config/*.json`, `pytest.ini`).
-4. Run the available tests before modifying code and record the real output.
-5. Produce an initial technical audit of the current state.
-6. Identify bugs, architectural weaknesses, incomplete features and security risks.
-7. Propose a prioritized implementation plan.
-8. Work on its own dedicated branch.
-9. Never work directly on `main`.
-10. Never remove existing functionality without documented justification and approval.
-11. Never invent test results or claim successful execution without evidence.
-12. Run the relevant tests after every change.
-13. Submit changes through Pull Requests.
-14. Include a clear summary, changed files, test results and remaining risks in each PR.
+The work already present is **Phase-1a preparation only**: isolated sandbox evidence,
+four focused tests (T2/T3/T4/T9), the quality ledger, the Phase 0 audit, and the
+sanitized handover. It is **not** completion of the agreed Prompt 01A. No production
+source-code defect fixes have been made in this preparation.
+
+Three known defects remain deliberately unfixed:
+- T2: total-label substring false positives (G3/R3).
+- T3: temporal columns classified as numeric measures (G5/R4).
+- T9: output suffix is not validated (G11/R8).
+
+T2, T3 and T9 are temporarily marked `xfail(strict=True)` so the preparation baseline
+can have a passing CI gate without pretending the defects are fixed. When a later stage
+actually fixes one, remove its xfail marker and require a normal pass. T4 is a normal
+passing regression guard; the audit found R5 was not reproducible.
+
+### Instructions for the next AI agent
+
+1. Fetch the repository and start from `feature/prompt-01a-data-model-metadata`.
+2. Verify the checked-out branch, HEAD SHA and clean working tree. Do not switch to
+   `main` for implementation.
+3. Read `docs/NEXT_AGENT_START_HERE.md`, `MASTER_PROJECT_HANDOVER_PUBLIC.txt`,
+   `PHASE0_BASELINE_AUDIT.md`, this guide and `docs/quality_evidence.md`.
+4. Treat the Phase 0 audit and its recorded evidence as the accepted project baseline.
+   Do not repeat the full audit or ask the user to resend these repository documents.
+5. Execute only the exact original Prompt 01A supplied by the user:
+   **Data Model, Workbook Structure, and Metadata Extraction**. Do not substitute
+   Phase 1a of the audit for Prompt 01A, and do not drift into Prompt 01B.
+6. Follow the supplied shared execution contract: one dedicated branch per stage,
+   focused tests, actual evidence, no merge/push to `main`, no rewrite of project
+   architecture, Python as the numeric source of truth, and Qwen for narrative only.
+7. The three original administrative files and the private reference workbook are not
+   in GitHub. Do not fabricate them, commit them, or claim real-file acceptance. The
+   owner performs those tests locally on the Windows target.
+8. Keep the Windows target `F:\Local-Office-AI\venv`, system Python, `F:\work`,
+   `legacy/` and all original input documents untouched. Never recreate or upgrade
+   the owner's Windows environment.
+
+Any reported test count must come from the actual command run in the current environment.
+The 38 tests marked `requires_sample` depend on a non-public workbook and are excluded
+from the CI gate with `-m "not requires_sample"`; they are not counted as successful.
 
 ## Layout
 - `src/local_office_ai/core/` — settings (JSON override), logging, exceptions, dataclasses.
@@ -63,7 +92,7 @@ Any agent working on this repository must:
 ## Commands
 ```bash
 python -m pip install -r requirements.txt -r requirements-documents.txt -r requirements-dev.txt
-python -m pytest tests -o addopts="" -q      # 216 tests collected (202 when PySide6 is unavailable)
+python -m pytest tests -o addopts="" -q      # collection varies by optional dependencies; record actual output
 python -m pytest tests -o addopts="" -q -m "not requires_sample"   # CI gate: reference workbook is not shipped
 python run_engine.py --file <xlsx> --no-ai --yes
 python run_engine.py --file <xlsx> --request "مقایسه 1404 با 1403 و بیشترین ماه" --no-ai

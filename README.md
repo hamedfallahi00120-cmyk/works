@@ -4,9 +4,11 @@
 
 ## ۰. وضعیت انتشار در GitHub (baseline برای بازبینی فنی)
 
-این مخزن از بستهٔ `Local-Office-AI_UI_UX_Refined.zip` استخراج شده و در شاخهٔ
-`upload/local-office-ai-ui-ux-refined` منتشر شده است. هدف، فراهم‌کردن یک baseline شفاف
-برای بازبینی فنی و ادامهٔ توسعه توسط یک عامل هوش مصنوعی دیگر است.
+سورس پایه ابتدا از بستهٔ `Local-Office-AI_UI_UX_Refined.zip` وارد شاخهٔ `main` شد
+(مبنای ممیزی: `6df625659c97c0b7da1f78f33fa5fc37864a7580`). گزارش Phase 0 و آماده‌سازی
+مرحله بعد در شاخهٔ `fix/multisource-extraction-integrity` نگهداری می‌شود. شاخهٔ شروع
+مهندسی Prompt 01A برابر `feature/prompt-01a-data-model-metadata` است؛ `main` نباید
+مستقیماً تغییر کند. این مخزن خصوصی است و فایل‌های اداری واقعی در آن قرار نمی‌گیرند.
 
 ### منبع و دامنه
 
@@ -33,7 +35,7 @@ src/local_office_ai/
   app/           مراحل Workflow و Coordinator
   ui/            CLI، wizard قدیم Tkinter، event bridge
   ui/desktop/    رابط اصلی مدرن (صفحات، تم RTL، فونت، Worker، پنل سخت‌افزار، ویجت شناور)
-tests/                        مجموعهٔ pytest (216 تست شناسایی‌شده)
+tests/                        مجموعهٔ pytest (تعداد آیتم‌ها وابسته به محیط؛ در CI فعلی پس از افزودن ۴ تست آماده‌سازی ۲۲۰ آیتم جمع‌آوری شد)
 config/                       تنظیمات پیش‌فرض (settings.json، synonyms.json، ui_settings.json)
 docs/                         گزارش‌ها و راهنماهای فنی همین نسخه
 legacy/                       اسکریپت V4.2 دست‌نخورده و لانچر آن
@@ -51,7 +53,7 @@ logs/                         محل لاگ در زمان اجرا (در مخز�
 
 | مورد | وضعیت | اثر |
 |---|---|---|
-| `data/input/Book2_AI_V4_2_Monitored.xlsx` | در بستهٔ ZIP نبود | ۳۸ تست به آن وابسته‌اند و در اجرا error/fail می‌شوند |
+| `data/input/Book2_AI_V4_2_Monitored.xlsx` | در بستهٔ ZIP/مخزن نیست | ۳۸ تست با نشان `requires_sample` به آن وابسته‌اند و در CI با marker از gate عمومی کنار گذاشته می‌شوند |
 | `data/input/General_Office_Demo.xlsx` | در بستهٔ ZIP نبود | فقط در مستندات به آن اشاره شده است |
 | `reference/v5_sample_report/` | در بستهٔ ZIP نبود | فقط مرجع طراحی است و در زمان اجرا خوانده نمی‌شود |
 | `venv/`، لاگ‌ها، خروجی‌های تولیدشده | به‌عمد حذف شده | با `.gitignore` کنار گذاشته شده‌اند |
@@ -59,7 +61,10 @@ logs/                         محل لاگ در زمان اجرا (در مخز�
 
 هیچ فایل گمشده‌ای بازسازی یا حدس زده نشده است.
 
-### وضعیت واقعی تست‌ها (اجراشده، نه ادعا)
+### نتیجهٔ تاریخی آزمون بستهٔ اولیه
+
+> این نتیجه مربوط به آزمون بستهٔ اولیه، پیش از چهار تست آماده‌سازی فعلی است؛ برای وضعیت تازه
+> باید `docs/quality_evidence.md` و آخرین اجرای GitHub Actions خوانده شود.
 
 اجرا روی Linux، Python 3.13.15، PySide6 6.12.0، openpyxl 3.1.5، psutil 7.2.2،
 pytest 9.2.0 با `QT_QPA_PLATFORM=offscreen`:
@@ -69,8 +74,9 @@ python -m pytest tests -o addopts="" -q
 → 216 tests: 174 passed, 4 skipped, 37 errors, 1 failure
 ```
 
-- **هر ۳۸ مورد error/failure** یک علت مشترک دارد: نبودن فایل نمونهٔ
-  `data/input/Book2_AI_V4_2_Monitored.xlsx` (`tests/conftest.py::sample_path`).
+- ۳۸ تست `requires_sample` به فایل خصوصی
+  `data/input/Book2_AI_V4_2_Monitored.xlsx` وابسته‌اند. این فایل در مخزن قرار نمی‌گیرد؛
+  CI از نشان `-m "not requires_sample"` استفاده می‌کند تا این تست‌ها را اجرا نکند.
 - **۴ مورد skip** مربوط به نبود کتابخانه‌های اختیاری `docx` و `pdfplumber`
   (`requirements-documents.txt`) است.
 - `tests/test_modern_ui.py` با نصب PySide6 اجرا شد: ۴ تست موفق، ۲ تست فقط به‌دلیل
@@ -78,20 +84,25 @@ python -m pytest tests -o addopts="" -q
 - تست‌های ویندوزی (پنل شناور always-on-top، System Tray، GPU از `nvidia-smi`/LibreHardwareMonitor)
   روی Linux قابل تأیید نیستند و در گزارش‌های `docs/` هم به‌عنوان تأییدنشده ثبت شده‌اند.
 
-### شروع کار برای بازبین / عامل بعدی
+### شروع کار برای AI بعدی — Prompt 01A
 
-1. `AGENTS.md` را کامل بخوانید؛ قواعد موتور و لایهٔ رابط در آن آمده است.
-2. `docs/ui_ux_refined_report.md` (دامنهٔ پاس رابط) و `docs/final_delivery_report.md` را ببینید.
-3. `pip install -r requirements.txt -r requirements-documents.txt -r requirements-dev.txt` سپس
-   `python -m pytest tests -o addopts="" -q`؛ برای اجرای CI یا محیطی که فایل نمونه را ندارد:
-   `python -m pytest tests -o addopts="" -q -m "not requires_sample"`.
-4. برای بازگرداندن پوشش تست‌های مرجع، فایل نمونه را در `data/input/` قرار دهید؛
-   بدون آن بخش زیادی از تست‌ها با خطای «reference workbook is missing» متوقف می‌شوند.
-5. روی شاخهٔ اختصاصی خود کار کنید و تغییرات را با Pull Request ارائه دهید.
+Phase 0 قبلاً انجام و مستند شده است. برای شروع، `docs/NEXT_AGENT_START_HERE.md`
+را دنبال کنید. شاخهٔ شروع `feature/prompt-01a-data-model-metadata` است.
+
+عامل بعدی باید مستندات موجود را بخواند و فقط branch/HEAD/working tree را تأیید کند؛
+نیازی به اجرای مجدد ممیزی Phase 0 یا درخواست دوبارهٔ handover/audit ندارد. سپس متن
+اصلی Prompt 01A را که مالک پروژه ارائه می‌کند اجرا کند. Prompt 01A هنوز اجرا نشده است.
+
+برای اجرای gate عمومی تست‌ها (بدون فایل مرجع محرمانه):
+
+```bash
+python -m pytest tests -o addopts="" -q -ra -m "not requires_sample"
+```
 
 ### محدودیت‌های شناخته‌شده
 
-- فایل نمونهٔ مرجع در مخزن نیست؛ بنابراین ۳۸ تست مرجع قابل اجرا نیستند.
+- فایل نمونهٔ مرجع و سه فایل اداری واقعی در مخزن نیستند؛ ۳۸ تست `requires_sample`
+  فقط در محیط محلی مجاز و با فایل نمونه قابل اجرا هستند.
 - بخشی از مستندات به مسیر ویندوزی `F:\Local-Office-AI` و `venv\Scripts\python.exe` وابسته است.
 - فایل `Local-Office-AI_UI_UX_Refined.zip` در ریشهٔ مخزن باقی مانده است (از کامیت قبلی `main`)
   و حذف آن نیاز به تأیید مالک دارد.
