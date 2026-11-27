@@ -21,9 +21,10 @@ The preparation work on the baseline branch consists of:
 - CI configuration aligned to Python 3.14.7, with artifact upload treated as best-effort.
 - Strict expected-failure classification for the three known unresolved defects.
 
-This is **Phase-1a preparation only**. It is not the agreed Prompt 01A.
-The original Prompt 01A — **Data Model, Workbook Structure, and Metadata Extraction** —
-has not yet been executed. Prompt 01B has not started.
+**Prompt 01A — Data Model, Workbook Structure, and Metadata Extraction — is implemented**
+on `feature/prompt-01a-data-model-metadata`; see the Prompt 01A section at the end of
+`docs/quality_evidence.md` and `docs/prompt_01a_technical_report.md`. Prompt 01B has not
+started. The branch is not merged and `main` is unchanged.
 
 ## Start procedure
 
@@ -50,7 +51,9 @@ python -m pytest tests -o addopts="" -q -ra -m "not requires_sample"
 
 Do not rely on historical test counts; collection changes with Python, PySide6 and optional dependencies. Read the latest GitHub Actions run for the exact CI result.
 
-T2, T3 and T9 are temporarily marked `xfail(strict=True)` because their defects are known and intentionally not fixed in this preparation stage. This is not a claim that they pass. If Prompt 01A genuinely fixes any of them, remove that test's xfail marker and require a normal pass. T4 is a normal passing guard; the audit did not reproduce R5.
+T2 and T3 are fixed by Prompt 01A and must keep passing normally. T9 is still
+`xfail(strict=True)` because the output-suffix defect remains open. T4 is a normal passing
+guard; the audit did not reproduce R5.
 
 ## CI execution policy
 
@@ -77,10 +80,10 @@ The repository workflow is intentionally PR-only:
 
 ## Known unresolved items
 
-- T2 / G3 / R3: total-label false positives.
-- T3 / G5 / R4: year/month/day columns can be misclassified as numeric measures.
-- T9 / G11 / R8: output suffix validation is missing.
+- T9 / G11 / R8: output suffix validation is missing (still `xfail(strict=True)`).
+- T2 / G3 / R3 and T3 / G5 / R4 are fixed in Prompt 01A; keep their tests passing.
 - T4 passes; R5 was found unreachable in the audited code path.
 - The three real acceptance files and the private sample workbook are not in the repository; real-file validation remains local to the owner's Windows environment.
+- Prompt 01A extraction evidence is sandbox-only; Windows-target and real-file acceptance are still owner-run.
 
-**The next engineering action is Prompt 01A, and only Prompt 01A.**
+**The next engineering action is Prompt 01B, and only Prompt 01B, after the owner accepts Prompt 01A.**

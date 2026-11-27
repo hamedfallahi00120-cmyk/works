@@ -31,6 +31,7 @@ from local_office_ai.core.settings import Settings
 from local_office_ai.excel.anomaly_detection import AnomalyDetector
 from local_office_ai.excel.calculations import FinancialCalculator
 from local_office_ai.excel.data_extractor import DataExtractor
+from local_office_ai.excel.extraction_model import ExtractionModelBuilder
 from local_office_ai.excel.reader import WorkbookReader
 from local_office_ai.excel.reconciliation import Reconciler
 from local_office_ai.excel.report_writer import ExcelReportWriter, ReportContext
@@ -291,10 +292,18 @@ class ExcelIntelligenceWorkflow:
                 sheet_primary,
                 generic=sheet_generic,
                 known_sheets=known_sheets,
+                source_name=Path(bundle.path).name,
             )
             sheet_intelligence.append(intel)
         analysis.sheets = sheet_intelligence
         analysis.intelligence = structure_engine.finalize(str(meta.path), sheet_intelligence)
+        analysis.extraction = ExtractionModelBuilder(self.settings).build(
+            source_path=bundle.path,
+            sheet_names=[sheet.title for sheet in meta.sheets],
+            grids=grids,
+            structures=sheet_structures,
+            intelligence=analysis.intelligence,
+        )
         for warning in analysis.intelligence.warnings:
             analysis.warnings.append(warning)
 

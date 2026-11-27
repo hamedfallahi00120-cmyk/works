@@ -175,6 +175,7 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
         "samples": lambda self, wb, context: self._samples(wb, context),
         "limitations": lambda self, wb, context: self._limitations(wb, context),
         "structure": lambda self, wb, context: self._structure(wb, context.analysis),
+        "extraction": lambda self, wb, context: self._extraction_model(wb, context.analysis),
     }
 
     def _plan(self, context: ReportContext, profile: str) -> list[str]:
@@ -223,6 +224,8 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
         if analysis.intelligence is not None:
             audit_tail.extend(["fields", "coverage", "metadata_warnings"])
             audit_tail.extend(["period_comparison", "reconciliation_sheet"])
+        if getattr(analysis, "extraction", None) is not None:
+            audit_tail.append("extraction")
         audit_tail.extend(
             [
                 "normalized",

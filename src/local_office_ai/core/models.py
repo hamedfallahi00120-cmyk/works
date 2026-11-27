@@ -73,6 +73,7 @@ class DataRole(str, Enum):
     TEMPORAL_KEY = "temporal_key"
     NUMERIC_MEASURE = "numeric_measure"
     CATEGORICAL = "categorical"
+    GROUP = "group"
     TEXT = "text"
     CALCULATED = "calculated"
     UNKNOWN = "unknown"
@@ -530,6 +531,10 @@ class AnalysisResult:
     # for the same reason; both objects implement ``to_dict``.
     sheets: list[Any] = field(default_factory=list)
     intelligence: Any = None
+    # Structured, traceable extraction model (workbook -> sheets -> blocks ->
+    # columns/cells/period evidence).  Typed as Any to avoid a models <-> excel
+    # import cycle; the object implements ``to_dict``.
+    extraction: Any = None
     # Period matrix built from the periodic sheets (month x period x metric) and
     # the grounded answers to the user's Persian request.
     integration: Any = None
@@ -569,6 +574,11 @@ class AnalysisResult:
                 self.intelligence.to_dict()
                 if hasattr(self.intelligence, "to_dict")
                 else self.intelligence
+            ),
+            "extraction": (
+                self.extraction.to_dict()
+                if hasattr(self.extraction, "to_dict")
+                else self.extraction
             ),
             "validation": [
                 item.to_dict() if hasattr(item, "to_dict") else item for item in self.validation

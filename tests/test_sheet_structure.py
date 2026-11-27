@@ -161,15 +161,11 @@ def test_total_label_helper():
     assert not is_total_label(None)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known baseline defect G3/R3; remove this marker when total-label matching is fixed.",
-)
 def test_total_label_needs_a_word_boundary():
     """G3 / R3: a label that merely contains جمع/کل is not a totals row.
 
-    Red until is_total_label switches to the word-boundary rule that the
-    statistics channel already uses (P0).
+    Totals keywords match on word boundaries, so ``کلانتری`` and ``جمعیت`` stay
+    ordinary labels while ``جمع کل`` is still a total.
     """
     for label in ("کلانتری ۱۲", "تکلیف", "جمعیت", "کلاسه پرونده"):
         assert not is_total_label(label), label
