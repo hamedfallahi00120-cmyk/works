@@ -6,17 +6,22 @@ The engine records duplicates and exclusions but never deletes or repairs a row.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import openpyxl
 
 from local_office_ai.app.coordinator import Coordinator
 from local_office_ai.app.folder_workflow import FolderWorkflow
 from local_office_ai.app.workflow import ExcelIntelligenceWorkflow
 from local_office_ai.excel.duplicate_control import (
+    AggregationDecision,
     AggregationStatus,
     CheckStatus,
+    DuplicateControlReport,
     RelationKind,
     SheetRole,
 )
+from local_office_ai.excel.statistical_reconciliation import ReconciliationStatus
 
 DETAIL = [
     ["گزارش تیر 1403"],
@@ -160,6 +165,7 @@ def test_parent_and_child_categories_are_recorded(make_workbook, settings):
     assert parents["اداری"].confirmed is False
     assert parents["اداری"].parent_value == "30"
     assert parents["اداری"].child_sum == "30"
+    assert any("والد/فرزند احتمالی" in warning for warning in report.warnings)
 
     grand = [
         relation
@@ -323,6 +329,7 @@ def test_formula_copy_without_summary_labels_is_derived(make_workbook, settings)
     assert sheets["بازنمایی"].role is SheetRole.DERIVED
     assert sheets["جزئیات"].role is SheetRole.PRIMARY
     assert "جزئیات" in sheets["بازنمایی"].referenced_sheets
+    assert sheets["بازنمایی"].evidence
 
 
 def test_record_duplicates_are_flagged_and_not_removed(make_workbook, settings):
@@ -446,3 +453,156 @@ def test_identical_values_in_different_periods_are_not_duplicates(make_workbook,
 
     assert not report.duplicate_groups
     assert all(sheet.role is SheetRole.PRIMARY for sheet in report.sheets)
+
+
+def test_sheet_with_one_duplicate_block_and_one_unique_block_stays_primary(
+    make_workbook, settings
+):
+    path = make_workbook(
+        "mixed_blocks.xlsx",
+        {
+            "الف": [
+                ["جدول دوم"],
+                [],
+                ["شعبه", "تعداد پرونده"],
+                ["ج", 5],
+                ["د", 5],
+                ["جمع", 10],
+            ],
+            "ترکیبی": [
+                ["جدول اول"],
+                [],
+                ["شعبه", "تعداد پرونده"],
+                ["الف", 10],
+                ["ب", 20],
+                ["جمع", 30],
+                [],
+                [],
+                ["جدول دوم"],
+                [],
+                ["شعبه", "تعداد پرونده"],
+                ["ج", 5],
+                ["د", 5],
+                ["جمع", 10],
+            ],
+        },
+    )
+    report = ExcelIntelligenceWorkflow(settings).analyze_only(path).duplicate_control
+    sheets = {sheet.sheet: sheet for sheet in report.sheets}
+
+    assert sheets["ترکیبی"].role is SheetRole.PRIMARY
+    assert sheets["ترکیبی"].data_blocks == 2
+    assert sheets["الف"].role is SheetRole.PRIMARY
+    assert "mixed_blocks.xlsx/الف" in sheets["ترکیبی"].duplicate_of
+    assert any(
+        entry.kind == "duplicate_table" and entry.sheet == "ترکیبی"
+        for entry in report.exclusions
+    )
+    assert any("بازنمایی تکراری" in line for line in sheets["ترکیبی"].evidence)
+
+
+def test_cross_sheet_total_formula_does_not_make_a_data_sheet_derived(
+    make_workbook, settings
+):
+    rows = [[f"شعبه {index}", index] for index in range(1, 11)]
+    other_rows = [[f"واحد {index}", index * 2] for index in range(1, 11)]
+    path = make_workbook(
+        "total_formula.xlsx",
+        {
+            "جزئیات": [["گزارش تیر 1403"], [], ["شعبه", "تعداد پرونده"], *rows, ["جمع", 55]],
+            "داده": [
+                ["گزارش تیر 1403"],
+                [],
+                ["شعبه", "تعداد پرونده"],
+                *other_rows,
+                ["جمع", "=SUM(جزئیات!B4:B13)"],
+            ],
+        },
+    )
+    report = ExcelIntelligenceWorkflow(settings).analyze_only(path).duplicate_control
+    sheets = {sheet.sheet: sheet for sheet in report.sheets}
+
+    assert sheets["داده"].cross_sheet_formula_cells >= 1
+    assert sheets["داده"].role is SheetRole.PRIMARY
+
+
+def test_sheet_without_data_is_unknown_and_flagged(make_workbook, settings):
+    path = make_workbook("unknown.xlsx", {"خالی": [["یادداشت بدون داده"]]})
+    report = ExcelIntelligenceWorkflow(settings).analyze_only(path).duplicate_control
+    sheets = {sheet.sheet: sheet for sheet in report.sheets}
+
+    assert sheets["خالی"].role is SheetRole.UNKNOWN
+    assert any("نامشخص" in warning for warning in report.warnings)
+
+
+def test_parent_category_rows_are_not_added_to_children_in_reconciliation(
+    make_workbook, settings
+):
+    path = make_workbook(
+        "parent_reconciliation.xlsx",
+        {
+            "گروه‌ها": [
+                ["گزارش تیر 1403"],
+                [],
+                ["گروه", "تعداد"],
+                ["اداری", 30],
+                ["الف", 10],
+                ["ب", 20],
+                ["عملیاتی", 25],
+                ["ج", 10],
+                ["د", 15],
+                ["جمع", 55],
+            ]
+        },
+    )
+    analysis = ExcelIntelligenceWorkflow(settings).analyze_only(path)
+    result = next(
+        item
+        for item in analysis.statistical_reconciliation.reconciliations
+        if item.kind == "component_total" and item.measure == "تعداد"
+    )
+
+    assert result.calculated == Decimal(55)
+    assert result.difference == Decimal(0)
+    assert result.status is ReconciliationStatus.WARNING
+    assert "والد" in result.explanation
+    assert "نیازمند بازبینی" in result.explanation
+
+
+def test_cross_source_status_only_uses_decisions_inside_the_selected_files():
+    report = DuplicateControlReport(
+        source_count=3,
+        decisions=[
+            AggregationDecision(
+                decision_id="A1",
+                metric="تعداد پرونده",
+                kind="measure",
+                members=[
+                    "a.xlsx/پرونده‌ها/A3:B5/«تعداد پرونده»",
+                    "b.xlsx/پرونده‌ها/A3:B5/«تعداد پرونده»",
+                ],
+                status=AggregationStatus.ALLOWED,
+                checks=[],
+            ),
+            AggregationDecision(
+                decision_id="A2",
+                metric="تعداد پرونده",
+                kind="measure",
+                members=[
+                    "a.xlsx/پرونده‌ها/A3:B5/«تعداد پرونده»",
+                    "c.xlsx/پرونده‌ها/A3:B5/«تعداد پرونده»",
+                ],
+                status=AggregationStatus.BLOCKED,
+                checks=[],
+            ),
+        ],
+    )
+
+    assert (
+        report.cross_source_status("تعداد پرونده", ["a.xlsx", "b.xlsx"])
+        is AggregationStatus.ALLOWED
+    )
+    assert (
+        report.cross_source_status("تعداد پرونده", ["a.xlsx", "c.xlsx"])
+        is AggregationStatus.BLOCKED
+    )

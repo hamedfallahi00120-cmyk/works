@@ -559,8 +559,8 @@ sandbox. None is counted as passing.
   contributors' cross-source status is not `ALLOWED`; one contributing file is always
   safe. «پاسخ درخواست» keeps the most/least comparison and omits an unsafe share.
 - The audit profile writes «کنترل تکرار و تجمیع»; the clean profile never writes it and
-  shows a compact role/decision summary plus at most 40 blocked/review decisions in
-  «اعتبارسنجی داده».
+  shows a compact role/decision summary, the duplicate-control warnings and at most 40
+  blocked/review decisions in «اعتبارسنجی داده».
 
 ### Test evidence [SBX]
 
@@ -568,10 +568,10 @@ Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
 
 ```text
 python -m pytest tests/test_duplicate_control.py -o addopts="" -q
--> 13 passed in 2.44s (exit 0)
+-> 18 passed in 2.84s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 295 passed, 2 skipped, 36 deselected, 1 xfailed in 36.21s (exit 0)
+-> 300 passed, 2 skipped, 36 deselected, 1 xfailed in 36.52s (exit 0)
 ```
 
 `tests/test_duplicate_control.py` uses real openpyxl workbooks and covers exact duplicate
@@ -580,7 +580,10 @@ summary sheets, parent/child categories, subtotal and grand-total duplication, o
 administrative classifications, independent sources with the same metric, similar-looking
 but independent datasets, a derived sheet without summary labels, copied total rows with
 different detail, record-level duplicates that are kept, identical values in different
-periods, serialization and the audit/clean output profiles.
+periods, a mixed sheet with one duplicate and one unique block that stays primary, a
+cross-sheet total formula in a data sheet that stays primary, an unknown sheet, parent
+rows excluded from automatic reconciliation, selected-file decision scope,
+serialization and the audit/clean output profiles.
 
 ### Not validated
 
@@ -591,5 +594,7 @@ periods, serialization and the audit/clean output profiles.
   total row has no summary fingerprint and is not grouped.
 - A duplicate whose values were edited slightly is `REVIEW`, not proof. A table with no
   real key column gets `REVIEW` coverage instead of a guessed overlap.
+- A formula-derived sheet is recognised when cross-sheet formulas cover at least half of
+  its data rows; a data sheet with only a total formula stays primary.
 - The folder comparison refuses only the cross-file sum/share; it does not rewrite or
   remove any per-file figure.

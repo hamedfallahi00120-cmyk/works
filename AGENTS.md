@@ -180,9 +180,10 @@ truncated.
   declared totals, cross-period comparison, serialization, clean/audit output profiles,
   warnings and the AI allow-list.
 - Known limits: automatic block reconciliation relies on declared total/subtotal rows
-  and the shared row classifier. A flat table that mixes a parent-category total with
-  its child rows, or overlapping administrative classifications without explicit tags,
-  cannot be proven safe from labels alone; use `reconcile_hierarchy` with
+  and the shared row classifier. Prompt 03B detects a probable parent-category row and
+  excludes it from the automatic component sum, downgrading a matching result to
+  `WARNING` for review. Overlapping administrative classifications without explicit
+  tags still cannot be proven safe from labels alone; use `reconcile_hierarchy` with
   `HierarchyNode` or `AggregationComponent.categories` for those structures.
   `compare_categories` is a deterministic API for aligned category maps; the engine does
   not infer category pairs from every layout. A ratio column without a detectable weight
@@ -300,22 +301,30 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
 - `report_writer.py` / `generic_report.py` — audit-only «کنترل تکرار و تجمیع» with sheet
   roles, duplicate groups, record duplicates, relations, decisions and every exclusion;
   the clean profile never writes it. The clean «اعتبارسنجی داده» shows a compact role /
-  decision summary and up to 40 blocked/review decisions.
+  decision summary, the duplicate-control warnings and up to 40 blocked/review decisions.
 - `structure_intelligence.py` — `formula_cells` and `cross_sheet_formula_cells` on every
   `SheetIntelligence`, computed from the whole sheet even when no table is detected.
-- `tests/test_duplicate_control.py` (13 tests) uses real openpyxl workbooks and covers
+- `statistical_reconciliation.py` — a probable/confirmed parent-category row recorded by
+  duplicate control is excluded from the automatic component sum, so a parent is never
+  added to its children. A matching result with a probable relation is `WARNING`, not
+  `PASS`, and its explanation names the excluded parent rows.
+- `tests/test_duplicate_control.py` (18 tests) uses real openpyxl workbooks and covers
   exact duplicate tables in different worksheets, copied summaries across workbooks,
   formula-based summary sheets, parent/child categories, subtotal and grand-total
   duplication, overlapping administrative classifications, independent sources with the
   same metric, similar-looking but independent datasets, a derived sheet without summary
   labels, copied total rows with different detail, record-level duplicates (kept, not
-  removed), identical values in different periods, serialization and the audit/clean
-  output profiles. `tests/test_output_quality.py` guards the audit-only sheet.
+  removed), identical values in different periods, a mixed sheet with one duplicate and
+  one unique block (stays primary), a cross-sheet total formula in a data sheet (stays
+  primary), an unknown sheet, parent rows excluded from automatic reconciliation,
+  selected-file decision scope, serialization and the audit/clean output profiles.
+  `tests/test_output_quality.py` guards the audit-only sheet.
 - Known limits: duplicate/overlap detection is fingerprint- and period-based; a real
   duplicate whose values were edited slightly is `REVIEW`, not proof. Without cached
   formula values (a file never opened by Excel) a total row has no fingerprint, so it is
-  not grouped. Formula references are matched by sheet name; external-workbook links are
-  not followed. Row-number columns are excluded from identifiers, so a table with no real
+  not grouped. A formula-derived sheet is recognised when cross-sheet formulas cover at
+  least half of its data rows; a data sheet with only a total formula stays primary.
+  Formula references are matched by sheet name; external-workbook links are not followed. Row-number columns are excluded from identifiers, so a table with no real
   key gets `REVIEW` coverage rather than a guessed overlap. The folder comparison refuses
   a cross-file total only when its decision is not `ALLOWED`; it does not rewrite any
   per-file figure.

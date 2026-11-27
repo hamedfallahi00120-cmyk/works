@@ -113,7 +113,6 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
     def build(self, context: ReportContext) -> Path:
         workbook = Workbook()
         workbook.remove(workbook.active)
-        analysis = context.analysis
         profile = context.profile or self.settings.report_profile or "clean"
 
         for key in self._plan(context, profile):
@@ -1104,6 +1103,11 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
             )
             ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=5)
             row += 1
+            for warning in duplicate_control.warnings[:6]:
+                self._value_cell(ws, row, 1, "هشدار کنترل تکرار")
+                self._value_cell(ws, row, 2, warning)
+                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=5)
+                row += 1
             wrote = False
             pending = [
                 *duplicate_control.blocked_decisions,

@@ -646,7 +646,7 @@ class DuplicateControlReport:
         for decision in self.decisions:
             if decision.kind != "measure" or not decision.cross_source:
                 continue
-            if selected is not None and not (decision.sources & selected):
+            if selected is not None and not decision.sources <= selected:
                 continue
             candidates = [decision.metric, *decision.headers]
             if target and not any(
@@ -1461,19 +1461,31 @@ def _value_overlap(
                     (f"دسته «{left_header}»", set(left_values), set(right_values))
                 )
     if not candidates:
-        left_keys = set().union(*(set(values) for values in left.key_values.values())) if left.key_values else set()
-        right_keys = set().union(*(set(values) for values in right.key_values.values())) if right.key_values else set()
-        if len(left_keys) >= 2 and len(right_keys) >= 2:
-            candidates.append(("مجموع شناسه‌ها", left_keys, right_keys))
-        else:
-            left_categories = set().union(
-                *(set(values) for values in left.category_values.values())
-            ) if left.category_values else set()
-            right_categories = set().union(
-                *(set(values) for values in right.category_values.values())
-            ) if right.category_values else set()
-            if len(left_categories) >= 2 and len(right_categories) >= 2:
-                candidates.append(("مجموع دسته‌ها", left_categories, right_categories))
+        # Different header names can still describe the same key.  Only compare
+        # one column per side; unioning several identifier columns would mix
+        # unrelated code spaces and invent an overlap.
+        if len(left.key_values) == 1 and len(right.key_values) == 1:
+            (left_header, left_values), = left.key_values.items()
+            (right_header, right_values), = right.key_values.items()
+            if len(left_values) >= 2 and len(right_values) >= 2:
+                candidates.append(
+                    (
+                        f"شناسه «{left_header}» / «{right_header}»",
+                        set(left_values),
+                        set(right_values),
+                    )
+                )
+        elif len(left.category_values) == 1 and len(right.category_values) == 1:
+            (left_header, left_values), = left.category_values.items()
+            (right_header, right_values), = right.category_values.items()
+            if len(left_values) >= 2 and len(right_values) >= 2:
+                candidates.append(
+                    (
+                        f"دسته «{left_header}» / «{right_header}»",
+                        set(left_values),
+                        set(right_values),
+                    )
+                )
 
     best: tuple[float, str, list[str], int, int] | None = None
     for basis, left_values, right_values in candidates:
@@ -1614,8 +1626,9 @@ def _classify_sheets(
             )
             for label in labels
         )
+        data_rows = sum(block.row_count for block in blocks)
         formula_based = (
-            (cross_sheet >= 2 and cross_sheet / max(formula_cells, 1) >= 0.5)
+            (cross_sheet >= 1 and data_rows > 0 and cross_sheet / data_rows >= 0.5)
             or (cross_sheet >= 1 and not blocks)
             or (
                 bool(getattr(intel, "derived", False))
@@ -1674,7 +1687,8 @@ def _classify_sheets(
                 role = SheetRole.SUMMARY
                 confidence = 0.9
                 evidence.append(
-                    f"{cross_sheet} از {formula_cells} سلول فرمول به برگه‌های دیگر ارجاع می‌دهد"
+                    f"{cross_sheet} سلول فرمول در {data_rows or formula_cells} ردیف داده به "
+                    f"برگه‌های دیگر ارجاع می‌دهد"
                     + (f" ({'، '.join(references)})" if references else "")
                     + "؛ برگه بازنمایی جمع‌شدهٔ داده‌های دیگر است."
                 )
@@ -1690,7 +1704,8 @@ def _classify_sheets(
                 role = SheetRole.DERIVED
                 confidence = 0.85
                 evidence.append(
-                    f"{cross_sheet} از {formula_cells} سلول فرمول به برگه‌های دیگر ارجاع می‌دهد"
+                    f"{cross_sheet} سلول فرمول در {data_rows or formula_cells} ردیف داده به "
+                    f"برگه‌های دیگر ارجاع می‌دهد"
                     + (f" ({'، '.join(references)})" if references else "")
                     + "؛ برگه از داده‌های دیگر ساخته شده و منبع مستقل نیست."
                 )
@@ -1701,7 +1716,7 @@ def _classify_sheets(
                 "برگه فقط ردیف‌های جمع دارد و ردیف داده مستقل ندارد؛ "
                 "افزودن آن به جزئیات شمارش دوباره است."
             )
-        elif duplicate_blocks and duplicate_blocks / len(blocks) >= 0.5:
+        elif duplicate_blocks and duplicate_blocks == len(blocks):
             role = SheetRole.DUPLICATE
             confidence = 0.9
             evidence.extend(duplicate_notes)
@@ -1715,10 +1730,17 @@ def _classify_sheets(
         elif data_blocks:
             role = SheetRole.PRIMARY
             confidence = 0.8
-            evidence.append(
-                f"برگه {data_blocks} بلوک داده مستقل دارد و فرمول ارجاع‌دهنده به "
-                "برگه‌های دیگر در آن دیده نشد."
-            )
+            if duplicate_blocks:
+                evidence.extend(duplicate_notes)
+                evidence.append(
+                    f"{duplicate_blocks} بلوک این برگه بازنمایی تکراری دارد و از تجمیع "
+                    "کنار گذاشته می‌شود؛ بقیه بلوک‌ها مستقل‌اند."
+                )
+            else:
+                evidence.append(
+                    f"برگه {data_blocks} بلوک داده مستقل دارد و فرمول ارجاع‌دهنده به "
+                    "برگه‌های دیگر در آن دیده نشد."
+                )
         else:
             role = SheetRole.UNKNOWN
             confidence = 0.4
@@ -2353,6 +2375,32 @@ def _warnings(
         warnings.append(
             f"{len(report.review_decisions)} تصمیم تجمیع نیازمند بررسی است و "
             "به‌طور خودکار مجاز نشد."
+        )
+    probable_parents = [
+        relation
+        for relation in report.category_relations
+        if relation.kind is RelationKind.PARENT_OF and not relation.confirmed
+    ]
+    if probable_parents:
+        warnings.append(
+            f"{len(probable_parents)} رابطه والد/فرزند احتمالی است و باید بازبینی شود؛ "
+            "هیچ ردیفی حذف یا خودکار کنار گذاشته نشد."
+        )
+    overlaps = [
+        relation
+        for relation in report.category_relations
+        if relation.kind is RelationKind.OVERLAP
+    ]
+    if overlaps:
+        warnings.append(
+            f"{len(overlaps)} هم‌پوشانی شناسه/دسته بین بلوک‌ها ثبت شد؛ "
+            "جمع آن بلوک‌ها مجاز نیست."
+        )
+    unknown_sheets = roles.get(SheetRole.UNKNOWN.value, 0)
+    if unknown_sheets:
+        warnings.append(
+            f"{unknown_sheets} برگه از نظر نقش نامشخص است؛ به‌عنوان منبع مستقل "
+            "در نظر گرفته نشد."
         )
     if any(profile.truncated for profile in profiles):
         warnings.append(
