@@ -12,6 +12,8 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from local_office_ai.reporting.formats import OutputFormat, ensure_extension_matches
+
 NAVY = "17365D"
 BLUE = "2F5597"
 LIGHT_BLUE = "DEEAF6"
@@ -39,7 +41,7 @@ class MixedReportWriter:
         workbook.properties.title = "Local Office AI - گزارش ترکیبی اسناد"
         workbook.properties.creator = "Local Office AI"
         workbook.properties.subject = "تحلیل داده و اسناد اداری"
-        target = Path(output)
+        target = ensure_extension_matches(Path(output), OutputFormat.XLSX)
         target.parent.mkdir(parents=True, exist_ok=True)
         temp = target.with_name(target.stem + ".tmp" + target.suffix)
         try:

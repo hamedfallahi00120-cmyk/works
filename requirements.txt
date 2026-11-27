@@ -1,5 +1,7 @@
 # Runtime dependencies (no pandas/numpy needed: openpyxl + Decimal are enough)
 openpyxl>=3.1,<4
+# DOCX report output in template mode; also used by the optional document reader.
+python-docx>=1.2.0,<2
 psutil>=5.9
 
 # Modern desktop interface (the CLI/engine also runs without it).

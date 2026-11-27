@@ -73,6 +73,10 @@ class Settings:
     # "clean" writes only the sheets the request needs; "audit" adds the
     # internal traceability/performance sheets for development.
     report_profile: str = "clean"
+    # Delivery format is resolved from --format, the output suffix or the
+    # request text; this value is only the fallback.
+    report_format: str = "xlsx"
+    docx_template: str = ""
     log_level: str = "INFO"
     keep_intermediate_json: bool = True
     extra: dict[str, Any] = field(default_factory=dict)
@@ -87,13 +91,20 @@ class Settings:
         ):
             directory.mkdir(parents=True, exist_ok=True)
 
-    def output_path_for(self, source: Path, suffix: str = "_AI_Intelligence") -> Path:
+    def output_path_for(
+        self,
+        source: Path,
+        suffix: str = "_AI_Intelligence",
+        extension: str = ".xlsx",
+    ) -> Path:
         """Return a collision-free output path that never equals the input."""
+
+        ext = extension if extension.startswith(".") else f".{extension}"
         stem = source.stem
-        candidate = self.output_dir / f"{stem}{suffix}.xlsx"
+        candidate = self.output_dir / f"{stem}{suffix}{ext}"
         counter = 1
         while candidate.exists() or candidate.resolve() == source.resolve():
-            candidate = self.output_dir / f"{stem}{suffix}_{counter}.xlsx"
+            candidate = self.output_dir / f"{stem}{suffix}_{counter}{ext}"
             counter += 1
         return candidate
 

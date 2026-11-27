@@ -672,6 +672,7 @@ class RunResult:
     analysis: AnalysisResult | None = None
     performance: dict[str, Any] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    report: Any = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -682,6 +683,11 @@ class RunResult:
             "analysis": self.analysis.to_dict() if self.analysis else None,
             "performance": dict(self.performance),
             "errors": list(self.errors),
+            "report": (
+                self.report.to_dict()
+                if hasattr(self.report, "to_dict")
+                else self.report
+            ),
         }
 
 

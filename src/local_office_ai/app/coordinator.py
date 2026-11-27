@@ -45,6 +45,8 @@ class Coordinator:
         goal: str | None = None,
         request: str | None = None,
         output: Path | str | None = None,
+        output_format: str | None = None,
+        template: Path | str | None = None,
         monitor: bool | None = None,
         profile: str | None = None,
         confirm_structure: Callable[[AnalysisResult], bool] | None = None,
@@ -67,6 +69,8 @@ class Coordinator:
                 goal=goal or question,
                 request=request or goal or question,
                 output_path=Path(output) if output else None,
+                output_format=output_format,
+                template=Path(template) if template else None,
                 confirm_structure=confirm_structure,
                 report_profile=profile or self.settings.report_profile or "clean",
             )

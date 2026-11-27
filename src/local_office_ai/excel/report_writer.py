@@ -37,6 +37,7 @@ from local_office_ai.excel.generic_report import GenericReportMixin
 from local_office_ai.excel.normalization import format_jalali
 from local_office_ai.excel.request_report import RequestReportMixin
 from local_office_ai.monitoring.performance_report import PerformanceReport, performance_rows
+from local_office_ai.reporting.formats import OutputFormat, ensure_extension_matches
 
 LOGGER = get_logger(__name__)
 
@@ -124,7 +125,7 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
         workbook.properties.description = "گزارش تولیدشده توسط موتور تحلیل Excel"
         workbook.calculation.fullCalcOnLoad = True
 
-        output = Path(context.output_path)
+        output = ensure_extension_matches(context.output_path, OutputFormat.XLSX)
         output.parent.mkdir(parents=True, exist_ok=True)
         temp = output.with_suffix(".tmp.xlsx")
         try:

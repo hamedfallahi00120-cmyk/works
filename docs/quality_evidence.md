@@ -28,6 +28,8 @@ the end of this file.
 | Prompt 02A | Implemented and merged as PR #6 (evidence at end) |
 | Prompt 02B | Implemented and merged as PR #7 (evidence at end) |
 | Prompt 03A | Implemented on `feature/prompt-03a-semantic-source-matching`; PR #8 open (evidence at end) |
+| Prompt 03B | Implemented and merged as PR #9; `main` at `18fb3d4` (evidence at end) |
+| Prompt 04A | Implemented on `feature/prompt-04a-output-format-docx-template` (evidence at end) |
 | Production source fixes in the preparation baseline | None; Prompts 01A, 01B, 02A, 02B and 03A add production source changes (below) |
 
 ## Evidence labels
@@ -58,7 +60,7 @@ The original report also recorded `--collect-only -> 202`. These are historical 
 | T2 | `test_total_label_needs_a_word_boundary` | G3 / R3 | **Fixed in Prompt 01A:** totals keywords match on word boundaries | Normal passing test |
 | T3 | `test_year_month_day_columns_are_not_measures` | G5 / R4 | **Fixed in Prompt 01A:** year/month/day keys are temporal, not measures | Normal passing test |
 | T4 | `test_code_columns_stay_identifiers` | G5 / R5 | Passes; R5 was not reproducible and must not be treated as a confirmed defect | Normal passing test |
-| T9 | `test_output_suffix_is_validated` | G11 / R8 | Known defect: XLSX content may be written under a `.docx` suffix | `xfail(strict=True)` |
+| T9 | `test_output_suffix_is_validated` | G11 / R8 | **Fixed in Prompt 04A:** a `.docx` output requires a DOCX template and never receives XLSX content | Normal passing test |
 
 The strict expected-failure markers are test-baseline bookkeeping, not defect fixes. They keep the baseline CI green while preserving executable regression tests. When a later prompt fixes one of these defects, that test must pass normally and its xfail marker must be removed; strict xfail intentionally makes an unexpected pass fail CI.
 
@@ -598,3 +600,100 @@ serialization and the audit/clean output profiles.
   its data rows; a data sheet with only a total formula stays primary.
 - The folder comparison refuses only the cross-file sum/share; it does not rewrite or
   remove any per-file figure.
+
+## Prompt 04A — Output Format Routing and Word Template Architecture [SBX]
+
+Branch: `feature/prompt-04a-output-format-docx-template`, created from `main` at
+`18fb3d4`. `main` was not modified.
+
+### What changed
+
+- `src/local_office_ai/reporting/formats.py` (new): `OutputFormat` (`xlsx`, `docx`,
+  `pdf`), `OutputIntent`, `detect_requested_formats`, `resolve_output_intent`,
+  `ensure_extension_matches` and `ensure_xlsx_delivery`. Explicit `--format`, output
+  suffix, request text and configured default are resolved once; contradictory signals
+  raise `ReportFormatError`. A bare «فایل اکسل» is input context, not an output request.
+  PDF is recognised but generation is explicitly unsupported.
+- `src/local_office_ai/reporting/specification.py` (new): `ReportSpecification`,
+  `ReportContent`, `ReportValue`, `ReportSection`, `ReportRow` and
+  `ReportGenerationResult`. DOCX requires a readable `.docx` template, the output suffix
+  must match the format, and the output path may not equal the template. `ReportContent`
+  is built from the validated `AnalysisResult` only; it carries source/address provenance
+  and never reads template values.
+- `src/local_office_ai/reporting/template.py` (new): `inspect_docx_template` records
+  section/page layout, margins, header/footer distances, gutter, fonts, paragraph styles,
+  heading hierarchy, tables, headers/footers, numbering and RTL/bidi details. It extracts
+  every `{{...}}` placeholder with its location and reports static numeric literals as
+  formatting artifacts. `ReportTemplate.is_data_source` is always `False`.
+- `src/local_office_ai/reporting/docx_writer.py` (new): `DocxTemplateRenderer` copies the
+  template and replaces placeholders in body paragraphs, table cells and headers/footers.
+  It preserves sections, margins, styles, heading levels, table styles, numbering and RTL
+  settings; a placeholder split across runs keeps the first run's formatting. Unknown
+  placeholders remain untouched and are warned. Output is saved atomically and checked as
+  a valid DOCX package.
+- `src/local_office_ai/reporting/generator.py` (new): `ReportGenerator.plan` selects
+  exactly one writer and `generate` routes to `ExcelReportWriter` or
+  `DocxTemplateRenderer`. `RunResult.report` carries the `ReportGenerationResult`.
+- `app/workflow.py`, `app/coordinator.py`, `ui/cli.py`: `--format`, `--template` and
+  `--inspect-template`; intent is resolved before analysis, so a Word request without a
+  template fails before writing output. `settings.report_format` and
+  `settings.docx_template` provide defaults; the configured template applies only to
+  Word output, and `--folder --template` is rejected.
+- `app/folder_workflow.py` and `app/document_set_workflow.py` are Excel-only and reject
+  DOCX/PDF requests with a clear error.
+- `excel/report_writer.py`, `excel/mixed_report_writer.py` and
+  `FolderReportWriter.build_folder` validate `.xlsx` at the writer boundary.
+- `core/exceptions.py`: `ReportFormatError` and `ReportTemplateError`.
+- `requirements.txt` now lists `python-docx>=1.2.0,<2` because DOCX output is part of the
+  runtime contract.
+- T9 (`test_output_suffix_is_validated`) now passes normally; its strict xfail marker was
+  removed.
+
+### Verification pass
+
+- `detect_requested_formats` now treats `report.docx`, «فایل docx» and «docx را تحلیل کن»
+  as input references, not output requests, while «گزارش Word»، «خروجی به فرمت docx» and
+  «فایل docx را بده» still select DOCX. A bare `docx` token remains an explicit request.
+- `settings.docx_template` is used only for DOCX output; a configured template no longer
+  makes an XLSX run fail. An explicit `--template` with XLSX/PDF is still rejected, and
+  `--folder --template` is rejected because folder reports are XLSX-only.
+- `ReportContent.from_analysis` preserves a zero-valued request answer as `"0"` instead
+  of turning it into «در دسترس نبود».
+- `ReportTemplate.inspect(path)` is a convenience alias for `inspect_docx_template`, and
+  source addresses are built without stray `!`/`None` segments.
+- DOCX output uses a unique temporary file, so a template named like the old temp path
+  (`report.tmp.docx`) is never overwritten.
+- `tests/test_report_output_formats.py` now has 23 tests; the new cases cover configured
+  template isolation, folder template rejection, zero answers, input-file references and
+  template preservation during atomic output.
+
+### Test evidence [SBX]
+
+Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
+
+```text
+python -m pytest tests/test_report_output_formats.py -o addopts="" -q
+-> 23 passed in 1.08s (exit 0)
+
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+-> 324 passed, 2 skipped, 36 deselected in 36.91s (exit 0)
+```
+
+`tests/test_report_output_formats.py` uses real openpyxl workbooks and real python-docx
+templates. It covers the seven required areas: output-format selection, file-extension
+validation, DOCX template inspection, style/layout preservation after rendering,
+placeholder detection across body/table/header/footer, missing/corrupt/unsupported
+templates, and rejection of mismatched output formats. It also checks template/data
+separation, unknown placeholders, PDF rejection, configured-template isolation, folder
+template rejection, zero-valued answers, input-file references and CLI DOCX generation
+with a template.
+
+### Not validated
+
+- The owner's Windows environment, Microsoft Word rendering and the real administrative
+  files. All DOCX evidence uses synthetic templates.
+- The full professional DOCX layout writer is intentionally out of scope; this stage
+  implements the contract and template-mode placeholder rendering.
+- Folder and multi-source reports remain XLSX-only. PDF is recognised but not generated.
+- Placeholders inside hyperlinks, text boxes, footnotes or comments are not rewritten;
+  body paragraphs, table cells and headers/footers are covered.

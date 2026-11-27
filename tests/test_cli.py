@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from local_office_ai.ui.cli import main
 
 
@@ -119,15 +117,11 @@ def test_cli_image_generation_uses_both_services(project_root, sample_path, fake
     assert images and images[0].read_bytes().startswith(b"\x89PNG")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known baseline defect G11/R8; remove this marker when the output-suffix guard is implemented.",
-)
 def test_output_suffix_is_validated(make_workbook, project_root):
-    """G11 / R8: an unsupported output suffix must fail loudly.
+    """G11 / R8: a ``.docx`` output must not receive an Excel workbook.
 
-    Red until the output-format guard exists (P0-4). Today an xlsx workbook is
-    written under the .docx name, which Word cannot open.
+    DOCX generation is template-based.  Without a template the request fails
+    loudly instead of writing XLSX content under a Word name.
     """
     source = make_workbook(
         "costs.xlsx",

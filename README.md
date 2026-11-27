@@ -7,9 +7,10 @@
 سورس پایه ابتدا از بستهٔ `Local-Office-AI_UI_UX_Refined.zip` وارد شاخهٔ `main` شد
 (مبنای ممیزی: `6df625659c97c0b7da1f78f33fa5fc37864a7580`). گزارش Phase 0 و آماده‌سازی
 مرحله بعد در شاخهٔ `fix/multisource-extraction-integrity` نگهداری می‌شود. Prompt 01A
-در PR #4 در `main` ادغام شد و شاخهٔ مهندسی Prompt 01B برابر
-`feature/prompt-01b-multiblock-extraction` است؛ `main` نباید مستقیماً تغییر کند. این
-مخزن خصوصی است و فایل‌های اداری واقعی در آن قرار نمی‌گیرند.
+در PR #4، Prompt 01B در PR #5، Prompt 02A در PR #6، Prompt 02B در PR #7 و Prompt 03B
+در PR #9 در `main` ادغام شدند؛ Prompt 03A روی PR #8 باز است و Prompt 04A روی شاخهٔ
+`feature/prompt-04a-output-format-docx-template` پیاده‌سازی شده است. `main` نباید
+مستقیماً تغییر کند. این مخزن خصوصی است و فایل‌های اداری واقعی در آن قرار نمی‌گیرند.
 
 ### منبع و دامنه
 
@@ -71,29 +72,30 @@ logs/                         محل لاگ در زمان اجرا (در مخز�
 pytest 9.2.0 با `QT_QPA_PLATFORM=offscreen`:
 
 ```
-python -m pytest tests -o addopts="" -q
-→ 216 tests: 174 passed, 4 skipped, 37 errors, 1 failure
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+→ 324 passed, 2 skipped, 36 deselected in 36.91s
 ```
 
-- ۳۸ تست `requires_sample` به فایل خصوصی
+- ۳۶ تست `requires_sample` به فایل خصوصی
   `data/input/Book2_AI_V4_2_Monitored.xlsx` وابسته‌اند. این فایل در مخزن قرار نمی‌گیرد؛
   CI از نشان `-m "not requires_sample"` استفاده می‌کند تا این تست‌ها را اجرا نکند.
-- **۴ مورد skip** مربوط به نبود کتابخانه‌های اختیاری `docx` و `pdfplumber`
-  (`requirements-documents.txt`) است.
-- `tests/test_modern_ui.py` با نصب PySide6 اجرا شد: ۴ تست موفق، ۲ تست فقط به‌دلیل
-  همان فایل نمونه error دادند.
+- ۲ مورد skip مربوط به نبود `libEGL.so.1` برای `PySide6` در این محیط sandbox است
+  (`test_floating_monitor.py` و `test_modern_ui.py`) و به‌عنوان موفق شمرده نمی‌شود.
+- `tests/test_modern_ui.py` و `tests/test_floating_monitor.py` در این sandbox به‌دلیل
+  نبود `libEGL.so.1` اجرا نشدند؛ این دو تست روی محیط Windows باید جداگانه تأیید شوند.
 - تست‌های ویندوزی (پنل شناور always-on-top، System Tray، GPU از `nvidia-smi`/LibreHardwareMonitor)
   روی Linux قابل تأیید نیستند و در گزارش‌های `docs/` هم به‌عنوان تأییدنشده ثبت شده‌اند.
 
-### شروع کار برای AI بعدی — Prompt 01B
+### شروع کار برای AI بعدی — Prompt 04A
 
 Phase 0 قبلاً انجام و مستند شده است. برای شروع، `docs/NEXT_AGENT_START_HERE.md`
-را دنبال کنید. شاخهٔ شروع `feature/prompt-01b-multiblock-extraction` است.
+را دنبال کنید. شاخهٔ جاری `feature/prompt-04a-output-format-docx-template` است و
+Prompt 01A، 01B، 02A، 02B و 03B در `main` ادغام شده‌اند؛ Prompt 03A روی PR #8 باز است.
 
 عامل بعدی باید مستندات موجود را بخواند و فقط branch/HEAD/working tree را تأیید کند؛
-نیازی به اجرای مجدد ممیزی Phase 0 یا درخواست دوبارهٔ handover/audit ندارد. Prompt 01A
-اجرا و در `main` ادغام شده است و Prompt 01B روی شاخهٔ اختصاصی خود اجرا شده است.
-مرحلهٔ بعدی فقط پس از پذیرش Prompt 01B توسط مالک پروژه آغاز می‌شود.
+نیازی به اجرای مجدد ممیزی Phase 0 یا درخواست دوبارهٔ handover/audit ندارد. Prompt 04A
+روی شاخهٔ اختصاصی خود پیاده‌سازی شده و مرحلهٔ بعدی فقط پس از پذیرش آن توسط مالک پروژه
+آغاز می‌شود.
 
 برای اجرای gate عمومی تست‌ها (بدون فایل مرجع محرمانه):
 
@@ -103,7 +105,7 @@ python -m pytest tests -o addopts="" -q -ra -m "not requires_sample"
 
 ### محدودیت‌های شناخته‌شده
 
-- فایل نمونهٔ مرجع و سه فایل اداری واقعی در مخزن نیستند؛ ۳۸ تست `requires_sample`
+- فایل نمونهٔ مرجع و سه فایل اداری واقعی در مخزن نیستند؛ ۳۶ تست `requires_sample`
   فقط در محیط محلی مجاز و با فایل نمونه قابل اجرا هستند.
 - بخشی از مستندات به مسیر ویندوزی `F:\Local-Office-AI` و `venv\Scripts\python.exe` وابسته است.
 - فایل `Local-Office-AI_UI_UX_Refined.zip` در ریشهٔ مخزن باقی مانده است (از کامیت قبلی `main`)
@@ -205,7 +207,10 @@ Run_Tests.bat
 | `--task` | `general_analysis` \| `data_quality` \| `trend_analysis` \| `group_comparison` \| `correlation_analysis` \| `management_analysis` \| … |
 | `--question` | پرسش کاربر دربارهٔ فایل |
 | `--goal` | هدف تحلیل به زبان طبیعی؛ در GUI هم فیلد جداگانه دارد |
-| `--output`, `-o` | مسیر خروجی |
+| `--output`, `-o` | مسیر خروجی؛ پسوند باید با قالب انتخاب‌شده هم‌خوان باشد |
+| `--format`, `-F` | قالب خروجی: `xlsx`، `docx` یا `pdf`؛ پیش‌فرض از پسوند یا درخواست خوانده می‌شود |
+| `--template` | قالب Word (`.docx`) برای گزارش جایگزینی جایگاه‌ها |
+| `--inspect-template` | بازرسی ساختار، سبک‌ها، شماره‌گذاری، RTL و جایگاه‌های یک قالب Word |
 | `--json` | ذخیرهٔ خلاصهٔ ماشین‌خوان |
 | `--check-structure` | فقط تشخیص ساختار؛ بدون تولید فایل |
 | `--list-models` | فهرست مدل‌های نصب‌شده Ollama |
@@ -215,6 +220,12 @@ Run_Tests.bat
 | `--gui` | رابط گرافیکی Tkinter |
 | `--root` | ریشهٔ پروژه (پیش‌فرض: محل همین بسته) |
 | `--quiet` | خروجی کنسول کم‌تر |
+
+گزارش Word فقط در حالت قالب‌محور تولید می‌شود: `--template` لازم است و خروجی باید
+پسوند `.docx` داشته باشد. اگر درخواست کاربر «گزارش Word» باشد ولی قالبی داده نشود،
+اجرا با خطای روشن متوقف می‌شود و هیچ فایل Excel با پسوند Word نوشته نمی‌شود. خروجی
+PDF شناسایی می‌شود اما تولید آن در این مرحله پشتیبانی نمی‌شود. گزارش پوشه و چندمنبعی
+فعلاً فقط Excel است.
 
 اگر ساختار فایل با اطمینان کمتر از ۶۰٪ تشخیص داده شود، در حالت تعاملی از کاربر تأیید
 گرفته می‌شود؛ در حالت غیرتعاملی (سرویس/تست) پردازش با ثبت هشدار ادامه می‌یابد.

@@ -22,6 +22,7 @@ from local_office_ai.core.settings import Settings
 from local_office_ai.ingestion.models import ExtractedDocument, ExtractedTable
 from local_office_ai.ingestion.reader import DocumentReader, EXCEL_SUFFIXES, SUPPORTED_DOCUMENT_SUFFIXES
 from local_office_ai.ingestion.statistics import profile_excel_analysis, profile_table
+from local_office_ai.reporting.formats import ensure_xlsx_delivery
 
 LOGGER = get_logger(__name__)
 _SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "output", "outputs", "processed", "temp", "tmp", "logs", "reports", "reference", "legacy", "tools"}
@@ -125,6 +126,7 @@ class DocumentSetWorkflow:
         model: str | None = None,
         use_ai: bool = True,
         output: Path | str | None = None,
+        output_format: str | None = None,
         label: str | None = None,
     ) -> DocumentSetResult:
         if paths is None:
@@ -244,7 +246,13 @@ class DocumentSetWorkflow:
                 LOGGER.warning("multi-source AI failed: %s", exc)
         elif not use_ai:
             result.ai_mode = "offline"
-        output_path = Path(output) if output else self._default_output()
+        output_path = ensure_xlsx_delivery(
+            output_path=output,
+            default_output_path=self._default_output(),
+            explicit_format=output_format,
+            request_text=result.request,
+            context="گزارش چندمنبعی",
+        )
         from local_office_ai.excel.mixed_report_writer import MixedReportWriter
 
         result.output_path = str(MixedReportWriter().build(result, output_path))
