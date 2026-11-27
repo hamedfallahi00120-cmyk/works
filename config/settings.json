@@ -28,5 +28,7 @@
   "gpu_interval_seconds": 2.5,
   "enable_gpu_monitoring": true,
   "log_level": "INFO",
-  "keep_intermediate_json": true
+  "keep_intermediate_json": true,
+  "report_format": "xlsx",
+  "docx_template": ""
 }

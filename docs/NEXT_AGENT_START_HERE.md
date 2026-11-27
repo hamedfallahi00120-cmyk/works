@@ -1,4 +1,4 @@
-# Next Agent Start Here — Prompt 03A
+# Next Agent Start Here — Prompt 04A
 
 ## Repository and starting point
 
@@ -10,6 +10,9 @@
 - Prompt 02B was merged to `main` as PR #7; `main` is at `891b662`.
 - Dedicated Prompt 03A branch: `feature/prompt-03a-semantic-source-matching`; PR #8 is open
   and is not merged to `main`.
+- Prompt 03B is implemented on its own dedicated branch.
+- Dedicated Prompt 04A branch: `feature/prompt-04a-output-format-docx-template`, created
+  from `main` at `18fb3d4`; it is not merged to `main` yet.
 - The three original administrative source files and the private sample workbook are
   intentionally not stored in GitHub.
 
@@ -35,25 +38,34 @@ profile writes «تطبیق معنایی منابع», and the folder report wri
 منابع». The branch is pushed and PR #8 is open; it is not merged to `main`. See
 `docs/quality_evidence.md` for the implementation record.
 
+**Prompt 04A — Output Format Routing and Word Template Architecture — is implemented on
+`feature/prompt-04a-output-format-docx-template`.** It adds the `reporting` package:
+`OutputFormat`/intent resolution, `ReportSpecification`/`ReportContent`,
+`inspect_docx_template`, `DocxTemplateRenderer` and `ReportGenerator`. Word output is
+template-only and never falls back to Excel; PDF is recognised but not generated. The
+CLI exposes `--format`, `--template` and `--inspect-template`. T9 is fixed.
+
 Recorded sandbox evidence (Linux, CPython 3.13.15, pytest 9.2.0):
 
 ```text
 python -m pytest tests/test_semantic_matching.py -o addopts="" -q
 -> 23 passed in 2.11s
 
+python -m pytest tests/test_report_output_formats.py -o addopts="" -q
+-> 18 passed in 0.94s
+
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 278 passed, 6 skipped, 36 deselected, 1 xfailed in 31.66s
+-> 319 passed, 2 skipped, 36 deselected in 37.12s
 ```
 
-The `xfailed` result is T9. The 36 deselected tests are `requires_sample`; their private
-workbook is absent and they are not counted as passing. The six skips are optional
-GUI/monitoring tests whose system libraries are unavailable in this sandbox and are not
-counted as passing.
+The 36 deselected tests are `requires_sample`; their private workbook is absent and they
+are not counted as passing. The two skips are optional GUI/monitoring tests whose system
+libraries are unavailable in this sandbox and are not counted as passing.
 
 ## Start procedure
 
 1. Fetch the private repository and switch to
-   `feature/prompt-03a-semantic-source-matching`.
+   `feature/prompt-04a-output-format-docx-template`.
 2. Verify the current branch, HEAD SHA and clean working tree. Record the exact output.
 3. Read, in this order:
    - `MASTER_PROJECT_HANDOVER_PUBLIC.txt`
@@ -63,9 +75,9 @@ counted as passing.
    - this file
 4. Use the Phase-0 audit as the accepted baseline. Do not demand that the owner resend
    these files, repeat the audit, or perform another exploratory phase.
-5. Prompt 01A, Prompt 01B, Prompt 02A, Prompt 02B and Prompt 03A are complete. Do not
-   repeat them or substitute audit Phase 1a for them. The next engineering action starts
-   only after the owner accepts Prompt 03A.
+5. Prompt 01A, Prompt 01B, Prompt 02A, Prompt 02B, Prompt 03A, Prompt 03B and Prompt 04A
+   are complete. Do not repeat them or substitute audit Phase 1a for them. The next
+   engineering action starts only after the owner accepts Prompt 04A.
 6. Work only on a dedicated branch for the next stage. Never commit directly to `main`.
 7. Keep later prompts out of scope until the owner authorizes them. Do not merge or push
    to `main`.
@@ -81,9 +93,9 @@ python -m pytest tests -o addopts="" -q -ra -m "not requires_sample"
 Do not rely on historical test counts; collection changes with Python, PySide6 and
 optional dependencies. Read the latest GitHub Actions run for the exact CI result.
 
-T2 and T3 are fixed by Prompt 01A and must keep passing normally. T9 is still
-`xfail(strict=True)` because the output-suffix defect remains open. T4 is a normal passing
-guard; the audit did not reproduce R5.
+T2 and T3 are fixed by Prompt 01A and must keep passing normally. T9 is fixed by
+Prompt 04A and must keep passing normally. T4 is a normal passing guard; the audit did not
+reproduce R5.
 
 ## CI execution policy
 
@@ -118,7 +130,7 @@ The repository workflow is intentionally PR-only:
 
 ## Known unresolved items
 
-- T9 / G11 / R8: output suffix validation is missing (still `xfail(strict=True)`).
+- T9 / G11 / R8 is fixed in Prompt 04A; keep its test passing normally.
 - T2 / G3 / R3 and T3 / G5 / R4 are fixed in Prompt 01A; keep their tests passing.
 - T4 passes; R5 was found unreachable in the audited code path.
 - The three real acceptance files and the private sample workbook are not in the

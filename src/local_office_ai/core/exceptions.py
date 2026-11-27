@@ -45,3 +45,11 @@ class ComfyUIError(EngineError):
 
 class ProcessingAborted(EngineError):
     """The operator or a guard stopped the run."""
+
+
+class ReportFormatError(EngineError):
+    """The requested output format is unsupported or does not match the writer."""
+
+
+class ReportTemplateError(EngineError):
+    """A DOCX report template is missing, unreadable or structurally unusable."""

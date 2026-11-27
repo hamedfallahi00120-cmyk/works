@@ -12,10 +12,22 @@ from pathlib import Path
 
 from local_office_ai.app.coordinator import Coordinator
 from local_office_ai.ai.ollama_client import OllamaClient
-from local_office_ai.core.exceptions import AIServiceError, EngineError, ProcessingAborted
+from local_office_ai.core.exceptions import (
+    AIServiceError,
+    EngineError,
+    ProcessingAborted,
+    ReportFormatError,
+    ReportTemplateError,
+)
 from local_office_ai.core.models import AnalysisResult, TableKind
 from local_office_ai.core.settings import load_settings
 from local_office_ai.app.workflow import ExcelIntelligenceWorkflow
+from local_office_ai.reporting import (
+    OutputFormat,
+    ReportSpecification,
+    inspect_docx_template,
+    resolve_output_intent,
+)
 
 KIND_FA = {
     TableKind.LOAN: "جدول وام",
@@ -61,6 +73,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--question", "-q", help="پرسش کاربر درباره فایل")
     parser.add_argument("--goal", help="هدف تحلیل به زبان طبیعی؛ مکمل یا جایگزین پرسش")
     parser.add_argument("--output", "-o", help="مسیر فایل خروجی")
+    parser.add_argument(
+        "--format",
+        "-F",
+        dest="output_format",
+        help="قالب خروجی: xlsx، docx یا pdf (پیش‌فرض از پسوند --output یا درخواست کاربر)",
+    )
+    parser.add_argument(
+        "--template",
+        help="مسیر قالب DOCX برای تولید گزارش Word (حالت جایگزینی جایگاه‌ها)",
+    )
+    parser.add_argument(
+        "--inspect-template",
+        metavar="PATH",
+        help="بازرسی ساختار، سبک‌ها و جایگاه‌های یک قالب Word و چاپ خلاصه",
+    )
     parser.add_argument("--json", dest="json_path", help="ذخیره خلاصه ماشین‌خوان در این مسیر")
     parser.add_argument("--list-models", action="store_true", help="فهرست مدل‌های نصب‌شده Ollama")
     parser.add_argument("--list-checkpoints", action="store_true", help="فهرست checkpoint های ComfyUI")
@@ -95,6 +122,8 @@ def main(argv: list[str] | None = None) -> int:
         return _list_models(settings)
     if args.list_checkpoints:
         return _list_checkpoints(settings)
+    if args.inspect_template:
+        return _inspect_template(Path(args.inspect_template))
 
     profile = "audit" if args.audit else (settings.report_profile or "clean")
 
@@ -112,13 +141,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.check_structure:
         return _check_structure(settings, source, request=args.request)
 
+    request = args.request or args.goal or args.question
+    try:
+        _validate_cli_output(settings, args, profile=profile, request=request)
+    except (ReportFormatError, ReportTemplateError) as exc:
+        print(f"خطا: {exc}", file=sys.stderr)
+        return 2
+
     coordinator = Coordinator(
         settings,
         progress=(lambda message: None) if args.quiet else None,
         console=not args.quiet,
     )
     confirm = _confirmation(settings, args.yes)
-    request = args.request or args.goal or args.question
     try:
         result = coordinator.run(
             source,
@@ -129,6 +164,8 @@ def main(argv: list[str] | None = None) -> int:
             goal=args.goal,
             request=request,
             output=args.output,
+            output_format=args.output_format,
+            template=_resolve_cli_template(settings, args.template),
             profile=profile,
             confirm_structure=confirm,
         )
@@ -152,6 +189,81 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _resolve_cli_template(settings, value) -> Path | None:
+    candidate = value or settings.docx_template or None
+    if not candidate:
+        return None
+    path = Path(candidate).expanduser()
+    if not path.is_absolute():
+        path = (settings.project_root / path).resolve()
+    return path
+
+
+def _validate_cli_output(settings, args, *, profile: str, request: str | None) -> None:
+    default = OutputFormat.from_token(settings.report_format) or OutputFormat.XLSX
+    intent = resolve_output_intent(
+        explicit_format=args.output_format,
+        output_path=args.output,
+        request_text=request,
+        default=default,
+    )
+    output_path = (
+        Path(args.output)
+        if args.output
+        else settings.temp_dir / f"report-validation{intent.output_format.extension}"
+    )
+    specification = ReportSpecification(
+        output_format=intent.output_format,
+        output_path=output_path,
+        profile=profile,
+        template_path=_resolve_cli_template(settings, args.template),
+        request=request or "",
+        evidence=intent.evidence,
+    )
+    specification.validate()
+
+
+def _inspect_template(path: Path) -> int:
+    try:
+        template = inspect_docx_template(path)
+    except ReportTemplateError as exc:
+        print(f"خطا: {exc}", file=sys.stderr)
+        return 1
+    print(f"قالب: {template.path}")
+    print(f"معتبر: {'بله' if template.valid else 'خیر'} | بخش‌ها: {template.section_count}")
+    for layout in template.page_layouts:
+        print(
+            f"  بخش {layout.index}: {layout.width_twips}×{layout.height_twips} twips | "
+            f"حاشیه بالا/پایین/چپ/راست: {layout.top_margin_twips}/{layout.bottom_margin_twips}/"
+            f"{layout.left_margin_twips}/{layout.right_margin_twips} | "
+            f"RTL: {'بله' if layout.bidi or layout.rtl_gutter else 'خیر'}"
+        )
+    print(f"سبک‌های پاراگراف: {len(template.styles)} | سبک‌های استفاده‌شده: {len(template.used_styles)}")
+    print(f"فونت‌های شناسایی‌شده: {len(template.fonts)}")
+    print(f"عنوان‌ها: {len(template.headings)}")
+    for heading in template.headings[:20]:
+        print(f"  سطح {heading.heading_level}: {heading.text[:80]}")
+    print(f"جدول‌ها: {len(template.tables)}")
+    for table in template.tables:
+        print(f"  {table.location}: {table.rows}×{table.columns} | سبک: {table.style or '—'}")
+    print(f"سرصفحه‌ها: {len(template.headers)} | پاصفحه‌ها: {len(template.footers)}")
+    print(f"شماره‌گذاری‌ها: {len(template.numbering)}")
+    rtl = template.rtl
+    print(
+        "RTL: "
+        f"سند={rtl.get('document_bidi')} | بخش={rtl.get('section_bidi')} | "
+        f"پاراگراف={rtl.get('bidi_paragraphs')} | اجرا={rtl.get('rtl_runs')}"
+    )
+    print(f"جایگاه‌ها ({len(template.placeholder_keys)}):")
+    for key in template.placeholder_keys:
+        print(f"  {key} ← {', '.join(template.placeholder_locations(key))}")
+    if template.static_numeric_literals:
+        print(f"اعداد ثابت قالب (به‌عنوان داده استفاده نمی‌شوند): {len(template.static_numeric_literals)}")
+    for warning in template.warnings:
+        print(f"هشدار: {warning}", file=sys.stderr)
+    return 0
+
+
 def _run_folder(settings, args, profile: str) -> int:
     from local_office_ai.app.folder_workflow import FolderWorkflow
 
@@ -170,8 +282,12 @@ def _run_folder(settings, args, profile: str) -> int:
             model=args.model,
             use_ai=not args.no_ai,
             output=args.output,
+            output_format=args.output_format,
             profile=profile,
         )
+    except ReportFormatError as exc:
+        print(f"خطا: {exc}", file=sys.stderr)
+        return 2
     except EngineError as exc:
         print(f"خطا: {exc}", file=sys.stderr)
         return 1

@@ -38,7 +38,6 @@ from local_office_ai.excel.statistical_reconciliation import StatisticalReconcil
 from local_office_ai.excel.extraction_model import ExtractionModelBuilder
 from local_office_ai.excel.reader import WorkbookReader
 from local_office_ai.excel.reconciliation import Reconciler
-from local_office_ai.excel.report_writer import ExcelReportWriter, ReportContext
 from local_office_ai.excel.row_classification import (
     classify_block_rows,
     role_counts,
@@ -56,6 +55,12 @@ from local_office_ai.excel.validation import DataValidator
 from local_office_ai.excel.workbook_inspector import inspect_workbook
 from local_office_ai.monitoring.performance_report import build_performance_report
 from local_office_ai.monitoring.resource_monitor import ResourceMonitor
+from local_office_ai.reporting import (
+    OutputFormat,
+    ReportGenerator,
+    ReportSpecification,
+    resolve_output_intent,
+)
 
 LOGGER = get_logger(__name__)
 
@@ -74,6 +79,8 @@ class WorkflowOptions:
     goal: str | None = None
     request: str | None = None
     output_path: Path | None = None
+    output_format: str | None = None
+    template: Path | None = None
     confirm_structure: Callable[[AnalysisResult], bool] | None = None
     report_profile: str = "clean"
 
@@ -158,6 +165,31 @@ class ExcelIntelligenceWorkflow:
             if output_path == source:
                 raise ProcessingAborted("مسیر خروجی با فایل ورودی یکسان است؛ خروجی در مسیر دیگری ذخیره شود.")
 
+            request_text = options.request or options.goal or options.question or ""
+            intent = resolve_output_intent(
+                explicit_format=options.output_format,
+                output_path=options.output_path,
+                request_text=request_text,
+                default=self._default_output_format(),
+            )
+            if options.output_path is None:
+                output_path = self.settings.output_path_for(
+                    source,
+                    extension=intent.output_format.extension,
+                )
+            specification = ReportSpecification(
+                output_format=intent.output_format,
+                output_path=output_path,
+                profile=profile,
+                template_path=self._resolve_template_path(options.template),
+                request=request_text,
+                evidence=intent.evidence,
+            )
+            specification.validate()
+            output_path = specification.output_path.resolve()
+            if output_path == source:
+                raise ProcessingAborted("مسیر خروجی با فایل ورودی یکسان است؛ خروجی در مسیر دیگری ذخیره شود.")
+
             finished_at = datetime.now()
             total_seconds = time.perf_counter() - run_started
             performance = None
@@ -174,18 +206,15 @@ class ExcelIntelligenceWorkflow:
                     output_path=str(output_path),
                 )
 
-            with self._stage("ساخت خروجی Excel"):
-                writer = ExcelReportWriter(self.settings)
-                writer.build(
-                    ReportContext(
-                        analysis=analysis,
-                        ai=ai,
-                        performance=performance,
-                        output_path=output_path,
-                        monitor=self.monitor,
-                        profile=profile,
-                    )
+            with self._stage(f"ساخت خروجی {specification.output_format.label_fa}"):
+                generation = ReportGenerator(self.settings).generate(
+                    specification,
+                    analysis=analysis,
+                    ai=ai,
+                    performance=performance,
+                    monitor=self.monitor,
                 )
+            output_path = Path(generation.output_path)
 
             input_unchanged = bundle.verify_unchanged()
             if not input_unchanged:
@@ -204,6 +233,7 @@ class ExcelIntelligenceWorkflow:
                 analysis=analysis,
                 performance=performance.to_dict() if performance is not None else {},
                 errors=errors,
+                report=generation,
             )
         finally:
             if self.monitor is not None:
@@ -746,6 +776,18 @@ class ExcelIntelligenceWorkflow:
         metadata["grounded"] = ai.response.is_grounded
         metadata["unsupported_numbers"] = ai.response.unsupported_numbers
         return metadata
+
+    def _default_output_format(self) -> OutputFormat:
+        return OutputFormat.from_token(self.settings.report_format) or OutputFormat.XLSX
+
+    def _resolve_template_path(self, value: Path | str | None) -> Path | None:
+        candidate = value or self.settings.docx_template or None
+        if candidate in (None, ""):
+            return None
+        path = Path(candidate).expanduser()
+        if not path.is_absolute():
+            path = (self.settings.project_root / path).resolve()
+        return path
 
     def _write_sidecar(self, analysis: AnalysisResult, performance, output_path: Path, source: Path) -> None:
         if not self.settings.keep_intermediate_json:

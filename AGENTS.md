@@ -30,7 +30,8 @@ Prompt 01A is implemented and merged:
   `تکلیف`, `جمعیت` and `کلاسه پرونده` are ordinary labels while `جمع کل` still totals.
 - T3 (G5/R4) is fixed: `سال`, `ماه` and `روز` columns whose content agrees
   (integer years, months 1..12, days 1..31) become `DataRole.TEMPORAL_KEY`, never measures.
-- T9 (G11/R8) remains open and stays `xfail(strict=True)`: output suffix is not validated.
+- T9 (G11/R8) is fixed by Prompt 04A: a `.docx` output requires a valid DOCX
+  template; otherwise the run fails and writes no Excel workbook under a Word name.
 
 T2 and T3 no longer carry xfail markers; they must keep passing normally. Do not
 reintroduce substring totals matching or let temporal keys back into numeric measures.
@@ -38,7 +39,10 @@ reintroduce substring totals matching or let temporal keys back into numeric mea
 Prompt 01B was merged to `main` as PR #5 (`113cc1f`). Prompt 02A was merged to `main`
 as PR #6 (`d173465`). Prompt 02B was merged to `main` as PR #7 (`891b662`). Prompt 03A
 is implemented on `feature/prompt-03a-semantic-source-matching`; the branch is pushed to
-origin and PR #8 is open, but it is not merged to `main`. See the sections below.
+origin and PR #8 is open, but it is not merged to `main`. Prompt 03B is implemented on
+its own branch. **Prompt 04A is implemented on
+`feature/prompt-04a-output-format-docx-template`; it is not merged to `main` yet.**
+See the sections below.
 
 ### Prompt 01A extraction model
 
@@ -329,6 +333,57 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
   a cross-file total only when its decision is not `ALLOWED`; it does not rewrite any
   per-file figure.
 
+### Prompt 04A output-format routing and DOCX template architecture
+
+- `reporting/formats.py` — `OutputFormat` (`XLSX`, `DOCX`, `PDF`), `OutputIntent`,
+  `detect_requested_formats`, `resolve_output_intent`, `ensure_extension_matches` and
+  `ensure_xlsx_delivery`. Format is resolved once from explicit `--format`, the output
+  suffix, the Persian/English request text and the configured default. Contradictory
+  signals raise `ReportFormatError`; a bare «فایل اکسل» describes the input, so only
+  «گزارش/خروجی اکسل» counts as an output request. PDF is recognised but generation is
+  explicitly unsupported.
+- `reporting/specification.py` — `ReportSpecification` (format, path, profile, template),
+  `ReportContent`/`ReportValue`/`ReportSection`, and `ReportGenerationResult`. DOCX
+  requires a readable `.docx` template and the output path may not equal the template.
+  `ReportContent.from_analysis` builds values only from the validated `AnalysisResult`
+  (calculations, descriptive statistics, request answers, warnings, anomalies) and keeps
+  each value's source and address. It never reads a template.
+- `reporting/template.py` — `inspect_docx_template` records page size, orientation,
+  margins, header/footer distances, gutter, section/paragraph bidi, RTL runs, fonts,
+  paragraph styles, heading hierarchy, tables (style, header row, `bidiVisual`), headers
+  and footers per section/variant, numbering definitions and every `{{...}}` placeholder
+  with its location. `ReportTemplate.is_data_source` is always `False`; static numbers
+  found in the template are reported as formatting artifacts, never as report data.
+- `reporting/docx_writer.py` — `DocxTemplateRenderer` copies the template and replaces
+  placeholders in body paragraphs, table cells and header/footer paragraphs. It preserves
+  sections, margins, styles, heading levels, table styles, numbering and RTL settings;
+  a placeholder split across runs is merged into the first run so that run's formatting
+  is kept. Unknown placeholders stay untouched and are reported. Output is saved through
+  an atomic temp file and checked as a valid DOCX package.
+- `reporting/generator.py` — `ReportGenerator.plan` selects exactly one writer
+  (`ExcelReportWriter` or `DocxTemplateRenderer`) and `generate` routes to it.
+  `RunResult.report` carries the `ReportGenerationResult`.
+- `app/workflow.py` / `coordinator.py` / `ui/cli.py` — `--format`, `--template` and
+  `--inspect-template`; the workflow resolves the intent before analysis, so a Word
+  request without a template fails before any output is written. `settings.report_format`
+  and `settings.docx_template` provide defaults. `app/folder_workflow.py` and
+  `app/document_set_workflow.py` are Excel-only and reject DOCX/PDF requests with an
+  explicit error.
+- `excel/report_writer.py`, `excel/mixed_report_writer.py` and
+  `FolderReportWriter.build_folder` validate `.xlsx` at the writer boundary, so a
+  mismatched suffix cannot reach a workbook writer.
+- `tests/test_report_output_formats.py` (18 tests) uses real openpyxl workbooks and real
+  python-docx templates: format tokens/suffixes, explicit/suffix/request/default routing,
+  conflicts, extension validation, PDF rejection, template inspection (layout, margins,
+  styles, headings, tables, headers/footers, numbering, RTL), placeholder detection across
+  body/table/header/footer, style/layout preservation after rendering, unknown
+  placeholders, missing/corrupt/unsupported templates, template/data separation and CLI
+  DOCX generation. T9 now passes normally; its strict xfail marker was removed.
+- Known limits: this stage defines the contract and a placeholder renderer, not the full
+  professional DOCX layout writer. A template is required for Word output. A placeholder
+  that crosses a run containing a tab, line break or field is left untouched and warned.
+  Folder and multi-source reports remain XLSX-only. PDF is recognised but not generated.
+
 ### Instructions for the next AI agent
 
 1. Fetch the repository and start from the branch that contains the latest accepted
@@ -343,8 +398,9 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
    (**Multi-Block Extraction, Table Boundaries, and Total Detection**), Prompt 02A
    (**Semantic Classification and Data Quality Validation**), Prompt 02B
    (**Statistical Reconciliation and Calculation Integrity**), Prompt 03A
-   (**Semantic Source Matching and Period Alignment**) and Prompt 03B
-   (**Duplicate Detection, Derived Sheets, and Safe Aggregation**) are implemented. Do
+   (**Semantic Source Matching and Period Alignment**), Prompt 03B
+   (**Duplicate Detection, Derived Sheets, and Safe Aggregation**) and Prompt 04A
+   (**Output Format Routing and Word Template Architecture**) are implemented. Do
    not repeat them or substitute audit Phase 1a for them. The next engineering action
    starts only after the owner accepts the latest prompt.
 6. Follow the supplied shared execution contract: one dedicated branch per stage,
@@ -375,6 +431,11 @@ from the CI gate with `-m "not requires_sample"`; they are not counted as succes
   report sheets as a mixin. `validation.py` holds the 9-check quality checklist.
 - `src/local_office_ai/ai/` — Ollama client, context builder, prompts, response validator,
   analyzer (model + deterministic fallback), ComfyUI image studio.
+- `src/local_office_ai/reporting/` — output-format decision layer and DOCX template
+  contract: `formats.py` (format resolution/validation), `specification.py`
+  (`ReportSpecification`, validated `ReportContent`), `template.py` (DOCX inspection),
+  `docx_writer.py` (template-mode placeholder rendering) and `generator.py` (writer
+  routing).
 - `src/local_office_ai/monitoring/` — psutil sampler + Windows GPU counters (`typeperf`).
 - `src/local_office_ai/app/` — workflow stages and coordinator.
 - `src/local_office_ai/ui/` — argparse CLI, optional Tkinter wizard, and `event_bridge`
@@ -404,6 +465,9 @@ python run_engine.py --file <xlsx> --request "مقایسه 1404 با 1403 و ب�
 python run_engine.py --folder data/input --request "جمع شاخص‌ها را مقایسه کن" --no-ai
 python run_engine.py --file <xlsx> --audit --no-ai     # full traceability output
 python run_engine.py --check-structure --file <xlsx>
+python run_engine.py --inspect-template templates/report.docx   # DOCX structure/styles/placeholders
+python run_engine.py --file <xlsx> --format docx --template templates/report.docx --no-ai --yes
+python run_engine.py --file <xlsx> --output report.docx --template templates/report.docx --no-ai --yes
 ```
 
 ## Report profiles
@@ -423,6 +487,17 @@ python run_engine.py --check-structure --file <xlsx>
   through `FolderWorkflow` in a QThread. The legacy Tk bridge remains as a rollback path.
 - Folder reports carry `درخواست کاربر`, `تفسیر درخواست` and a Decimal-built `پاسخ درخواست`
   row in `خلاصه پوشه`; `FolderResult.request` preserves the raw text.
+
+## Output formats
+- `OutputFormat` distinguishes `XLSX`, `DOCX` and `PDF`. Selection order is explicit
+  `--format`, output suffix, request text, then `settings.report_format`. Contradictory
+  signals are rejected instead of guessed.
+- Word output is template mode: `--template` is required and the output must end in
+  `.docx`. A Word request never falls back to an Excel workbook.
+- PDF is recognised but generation is not implemented; it fails with a clear error.
+- Folder and multi-source reports remain XLSX-only. Their workflows reject DOCX/PDF.
+- Template figures are presentation artifacts. Report numbers come only from
+  `ReportContent.from_analysis` / `AnalysisResult`.
 
 ## Request-aware analysis
 - `ai/request_analyzer.py` parses Persian requests into scope, target metrics, months, years.
@@ -451,6 +526,9 @@ is such a file: 4 sheets labelled 1403/1404, 4 labelled 1404/1405, heaviest over
 
 ## Rules
 - Python is the only authority for arithmetic. Never let model output alter figures.
+- Resolve the output format before selecting a writer. Never write an Excel workbook under
+  a `.docx`/`.pdf` name, never silently downgrade a Word request to Excel, and never use a
+  template's historical figures as report data.
 - A numeric identifier (postal code, personnel number, vehicle/region code, record number,
   year/month key) is never a measure. Use `semantic_vocabulary.identifier_evidence`; do not
   add a header-only ID check that ignores value patterns.

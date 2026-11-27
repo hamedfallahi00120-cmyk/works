@@ -33,6 +33,11 @@ from local_office_ai.excel.duplicate_control import (
 from local_office_ai.excel.period_integration import PeriodIntegration
 from local_office_ai.excel.report_writer import ExcelReportWriter
 from local_office_ai.excel.semantic_matching import match_across_sources
+from local_office_ai.reporting.formats import (
+    OutputFormat,
+    ensure_extension_matches,
+    ensure_xlsx_delivery,
+)
 
 LOGGER = get_logger(__name__)
 
@@ -141,6 +146,7 @@ class FolderWorkflow:
         model: str | None = None,
         use_ai: bool = True,
         output: Path | str | None = None,
+        output_format: str | None = None,
         profile: str = "clean",
         selected: Sequence[Path | str] | None = None,
     ) -> FolderResult:
@@ -221,7 +227,13 @@ class FolderWorkflow:
             matching=result.matching,
         )
 
-        output_path = Path(output) if output else self._default_output(source)
+        output_path = ensure_xlsx_delivery(
+            output_path=output,
+            default_output_path=self._default_output(source),
+            explicit_format=output_format,
+            request_text=request,
+            context="گزارش پوشه",
+        )
         writer = FolderReportWriter(self.settings)
         result.output_path = str(writer.build_folder(result, merged, output_path))
         result.status = "completed" if all(item.status == "تحلیل شد" for item in result.files) else "completed_with_warnings"
@@ -356,7 +368,7 @@ class FolderReportWriter(ExcelReportWriter):
         workbook.properties.creator = "Local Office AI Engine"
         workbook.calculation.fullCalcOnLoad = True
 
-        output = Path(output_path)
+        output = ensure_extension_matches(Path(output_path), OutputFormat.XLSX)
         output.parent.mkdir(parents=True, exist_ok=True)
         temp = output.with_suffix(".tmp.xlsx")
         try:
