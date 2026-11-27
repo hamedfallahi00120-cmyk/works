@@ -318,3 +318,98 @@ is absent and they are not counted as passing.
 - The owner's Windows environment and the three original administrative files.
 - Real-file acceptance for the new semantic and quality checks; the evidence uses
   synthetic `.xlsx` files created by the test suite.
+
+## Prompt 02B — Statistical reconciliation and calculation integrity (branch evidence)
+
+Branch `feature/prompt-02b-statistical-reconciliation`, based on `main` at `d173465`
+(the merge of Prompt 02A). No aggregation was added to the request-answering path;
+the new engine validates relationships that already exist in the workbook.
+
+### Implementation
+
+- `excel/statistical_reconciliation.py` (new): deterministic `Decimal` arithmetic for
+  component-to-total, subtotal-to-grand-total, group-to-subgroup, monthly-to-period and
+  cross-period checks. `AggregationEvidence` rejects forbidden roles (grand total,
+  subtotal, percentage, difference), duplicate categories, overlapping category tags
+  and mixed units before a sum is calculated; note/footer rows are excluded by the
+  shared row classifier. A missing component is `WARNING` with `calculated=None`,
+  never zero.
+- `compute_change` records absolute change, percentage change, direction and baseline
+  status. A zero or missing baseline yields `percent=None` with `WARNING`; no division
+  by zero and no fabricated percentage. `compute_ratio` and `compute_average` refuse a
+  missing denominator; a ratio column with no detectable weight column, or with more
+  than one plausible weight column, yields `WARNING` and no average, and a simple mean
+  is never reported as the weighted result.
+- `Tolerance.for_workbook` combines an absolute rounding tolerance from the component
+  count with a small relative tolerance for large monetary totals; `PASS`, `WARNING`
+  and `FAIL` are explicit. Every `ReconciliationResult` keeps expected, calculated,
+  difference, tolerance, status, explanation, sheet, block, measure and source
+  addresses; `verified` is true only for a justified relationship with a real expected
+  value.
+- A percentage/rate column is excluded from component sums (a percentage is not a
+  count). A grand total with prior subtotals also includes trailing data rows after the
+  last subtotal. Incomplete months are excluded from monthly reconciliation with a
+  `WARNING`; missing months and missing declared totals are reported rather than
+  skipped. An unusable period matrix or two periods without a common complete month
+  adds a report warning.
+- No relationship at all is not a `PASS`: the report status becomes `WARNING` and the
+  clean/audit views show the warning text. The clean view also lists non-`PASS`
+  averages, so a missing weight is never silent.
+- `app/workflow.py`: `AnalysisResult.statistical_reconciliation` is built after
+  semantics, quality and the period matrix. `core/models.py` serializes it into the
+  processed JSON.
+- `generic_report.py` / `report_writer.py`: the audit profile writes «تطبیق آماری و
+  صحت محاسبات»; the clean «اعتبارسنجی داده» sheet gains a compact reconciliation
+  summary plus non-`PASS` reconciliation, comparison and average findings and the
+  report warnings.
+- `ai/context_builder.py`: reconciliation facts and warnings are included in the AI
+  context and all reconciliation values are added to `allowed_numbers`.
+  `ai/analyzer.py` treats any statistical `FAIL` (reconciliation, comparison or
+  average) as a real mismatch. Qwen may explain the recorded figures but cannot
+  introduce a new number without failing the existing number validator.
+- `tests/test_statistical_reconciliation.py` (new, 36 tests) covers the nine required
+  cases with real openpyxl workbooks plus direct engine calls: correct and incorrect
+  component totals, subtotal/grand-total including trailing data after the last
+  subtotal, nested and overlapping categories, zero baseline, missing denominators,
+  weighted versus unweighted averages, rounding tolerances (absolute and relative),
+  increase/decrease interpretation, mixed units from a «واحد» column, percentage
+  totals that must not be reconciled as counts, ambiguous weight columns,
+  monthly-to-period reconciliation, incomplete/empty months, missing declared totals,
+  cross-period comparison, serialization, clean/audit output profiles, report warnings
+  and the AI number allow-list. `tests/test_output_quality.py` guards the new audit-only
+  sheet.
+
+### Test evidence [SBX]
+
+Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
+
+```text
+python -m pytest tests/test_statistical_reconciliation.py -o addopts="" -q
+-> 36 passed in 3.36s (exit 0)
+
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+-> 259 passed, 2 skipped, 36 deselected, 1 xfailed in 29.21s (exit 0)
+```
+
+The single `xfailed` outcome is still T9, the open output-suffix defect. The 36
+deselected tests are the `requires_sample` set; their private reference workbook is
+absent and they are not counted as passing. The two skips are the PySide6 GUI tests
+(`libEGL.so.1` is unavailable in this sandbox) and are not counted as passing.
+
+### Not validated
+
+- The owner's Windows environment and the three original administrative files.
+- Real-file acceptance for the new reconciliation checks; the evidence uses synthetic
+  `.xlsx` files created by the test suite.
+- Flat parent/child categories and overlapping administrative classifications are not
+  inferred from labels alone. `reconcile_hierarchy` and
+  `AggregationComponent.categories` cover those structures when the caller supplies
+  them; automatic block reconciliation handles declared totals, subtotals, group
+  headings, units and percentages.
+- Category-level comparisons are exposed through `compare_categories` for aligned
+  category maps; the workbook engine does not guess category pairs from arbitrary
+  layouts. Group-to-subgroup comparisons are exercised directly and through
+  group-heading blocks.
+- A ratio column with no weight column, or with more than one plausible weight column,
+  is reported as `WARNING` with no average; the engine does not pick a denominator by
+  position.

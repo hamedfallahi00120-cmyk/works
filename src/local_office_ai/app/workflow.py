@@ -33,6 +33,7 @@ from local_office_ai.excel.anomaly_detection import AnomalyDetector
 from local_office_ai.excel.calculations import FinancialCalculator
 from local_office_ai.excel.data_extractor import DataExtractor
 from local_office_ai.excel.data_quality import DataQualityAnalyzer
+from local_office_ai.excel.statistical_reconciliation import StatisticalReconciler
 from local_office_ai.excel.extraction_model import ExtractionModelBuilder
 from local_office_ai.excel.reader import WorkbookReader
 from local_office_ai.excel.reconciliation import Reconciler
@@ -375,6 +376,15 @@ class ExcelIntelligenceWorkflow:
         )
         analysis.request_intent = intent
         analysis.request_answers = answer_request(intent, analysis, analysis.integration)
+
+        # ---------------------------------------------------------------- #
+        # Reconciliation runs after the structure, semantics and period matrix
+        # exist.  It validates relationships that are explicitly present in the
+        # workbook and never invents a total, a denominator or a period match.
+        # ---------------------------------------------------------------- #
+        analysis.statistical_reconciliation = StatisticalReconciler(self.settings).analyze(
+            analysis, grids
+        )
 
         if primary is not None:
 

@@ -6,6 +6,7 @@ methods while still using the same styling helpers.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 
 from openpyxl.styles import Alignment
@@ -1032,6 +1033,158 @@ class GenericReportMixin:
             "G": 10, "H": 8, "I": 8, "J": 48,
         })
         ws.freeze_panes = f"A{header_row + 1}"
+        self._print_setup(ws)
+
+    # ------------------------------------------------------------------ #
+    def _statistical_reconciliation_sheet(self, wb, analysis: AnalysisResult) -> None:
+        """Audit-only view of every reconciliation and comparison result."""
+        from local_office_ai.excel.statistical_reconciliation import STATUS_FA
+
+        report = getattr(analysis, "statistical_reconciliation", None)
+        ws = wb.create_sheet("تطبیق آماری و صحت محاسبات")
+        self._rtl(ws)
+        self._title(ws, "تطبیق آماری: مقدار مورد انتظار، مقدار محاسبه‌شده، اختلاف و تحمل", 11)
+        row = 3
+        if report is None:
+            self._value_cell(ws, row, 1, "تطبیق آماری برای این فایل ساخته نشد.")
+            self._print_setup(ws)
+            return
+
+        counts = report.counts()
+        self._value_cell(ws, row, 1, "وضعیت کلی")
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=11)
+        self._value_cell(
+            ws,
+            row,
+            2,
+            f"{STATUS_FA.get(report.status, report.status.value)} — "
+            f"PASS {counts.get('PASS', 0)}، WARNING {counts.get('WARNING', 0)}، "
+            f"FAIL {counts.get('FAIL', 0)}، هشدارهای موتور {len(report.warnings)}",
+        )
+        row += 1
+        self._value_cell(ws, row, 1, "اصل محاسبه")
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=11)
+        self._value_cell(
+            ws,
+            row,
+            2,
+            "همه اعداد با Decimal در Python محاسبه شده‌اند؛ مدل زبانی مجاز به محاسبه مجدد نیست.",
+        )
+        row += 2
+
+        if report.warnings:
+            self._section(ws, row, "هشدارهای موتور تطبیق", 11)
+            row += 1
+            for warning in report.warnings:
+                self._value_cell(ws, row, 1, "هشدار")
+                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=11)
+                self._value_cell(ws, row, 2, warning)
+                self._fill(ws.cell(row, 1), YELLOW)
+                row += 1
+            row += 1
+
+        colors = {"PASS": GREEN, "WARNING": YELLOW, "FAIL": RED}
+        self._section(ws, row, "تطبیق جمع‌ها، اجزا، جمع میانی، گروه و دوره", 11)
+        row += 1
+        self._header(ws, row, [
+            "وضعیت", "نوع", "شاخص/برچسب", "مقدار مورد انتظار", "مقدار محاسبه‌شده",
+            "اختلاف", "تحمل", "توضیح", "برگه", "بلوک", "منابع",
+        ])
+        header_row = row
+        row += 1
+        for item in report.reconciliations:
+            values = [
+                STATUS_FA.get(item.status, item.status.value),
+                item.kind_label,
+                item.label or item.measure or "—",
+                item.expected,
+                item.calculated,
+                item.difference,
+                item.tolerance.describe_fa(item.expected),
+                item.explanation,
+                item.sheet or "—",
+                item.block or "—",
+                "؛ ".join(item.sources[:6]) or "—",
+            ]
+            for offset, value in enumerate(values, start=1):
+                money = offset in {4, 5, 6} and isinstance(value, Decimal)
+                self._value_cell(ws, row, offset, value, money=money)
+            self._fill(ws.cell(row, 1), colors.get(item.status.value, GREY))
+            row += 1
+        if row == header_row + 1:
+            self._value_cell(ws, row, 1, "رابطه جمع قابل توجیهی پیدا نشد.")
+            row += 1
+        else:
+            self._body(ws, header_row + 1, row - 1, 1, 11)
+
+        if report.comparisons:
+            row += 1
+            self._section(ws, row, "مقایسه بین‌دوره‌ای (تغییر مطلق و درصدی)", 11)
+            row += 1
+            self._header(ws, row, [
+                "وضعیت", "شاخص", "دوره مبنا", "دوره فعلی", "مقدار مبنا", "مقدار فعلی",
+                "تغییر مطلق", "تغییر درصد", "جهت", "توضیح", "منبع",
+            ])
+            comparison_header = row
+            row += 1
+            for item in report.comparisons:
+                change = item.change
+                values = [
+                    STATUS_FA.get(item.status, item.status.value),
+                    item.metric or "—",
+                    item.previous_label,
+                    item.current_label,
+                    change.previous,
+                    change.current,
+                    change.absolute,
+                    change.percent,
+                    change.direction,
+                    item.explanation,
+                    item.source or "—",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    money = offset in {5, 6, 7} and isinstance(value, Decimal)
+                    self._value_cell(ws, row, offset, value, money=money)
+                self._fill(ws.cell(row, 1), colors.get(item.status.value, GREY))
+                row += 1
+            self._body(ws, comparison_header + 1, row - 1, 1, 11)
+
+        if report.averages:
+            row += 1
+            self._section(ws, row, "میانگین ساده در برابر میانگین وزنی", 11)
+            row += 1
+            self._header(ws, row, [
+                "وضعیت", "شاخص", "مقدار گزارش‌شده", "میانگین ساده", "میانگین وزنی",
+                "وزن لازم", "وزن موجود", "تعداد مشاهده", "توضیح", "واحد", "—",
+            ])
+            average_header = row
+            row += 1
+            for item in report.averages:
+                values = [
+                    STATUS_FA.get(item.status, item.status.value),
+                    item.label or "—",
+                    item.value,
+                    item.unweighted,
+                    item.weighted,
+                    "بله" if item.weights_required else "خیر",
+                    "بله" if item.weights_available else "خیر",
+                    item.observations,
+                    item.explanation,
+                    item.unit or "—",
+                    "—",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    money = offset in {3, 4, 5} and isinstance(value, Decimal)
+                    self._value_cell(ws, row, offset, value, money=money)
+                self._fill(ws.cell(row, 1), colors.get(item.status.value, GREY))
+                row += 1
+            self._body(ws, average_header + 1, row - 1, 1, 11)
+
+        self._widths(ws, {
+            "A": 12, "B": 18, "C": 30, "D": 18, "E": 18, "F": 14,
+            "G": 26, "H": 64, "I": 18, "J": 14, "K": 44,
+        })
+        ws.freeze_panes = "A5"
         self._print_setup(ws)
 
     # ------------------------------------------------------------------ #

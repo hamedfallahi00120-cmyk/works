@@ -179,6 +179,9 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
         "extraction": lambda self, wb, context: self._extraction_model(wb, context.analysis),
         "semantics": lambda self, wb, context: self._semantics_sheet(wb, context.analysis),
         "quality_details": lambda self, wb, context: self._quality_details_sheet(wb, context.analysis),
+        "statistical_reconciliation": lambda self, wb, context: self._statistical_reconciliation_sheet(
+            wb, context.analysis
+        ),
     }
 
     def _plan(self, context: ReportContext, profile: str) -> list[str]:
@@ -233,6 +236,8 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
             audit_tail.append("semantics")
         if getattr(analysis, "quality", None) is not None:
             audit_tail.append("quality_details")
+        if getattr(analysis, "statistical_reconciliation", None) is not None:
+            audit_tail.append("statistical_reconciliation")
         audit_tail.extend(
             [
                 "normalized",
@@ -984,6 +989,82 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
                 row += 1
             if not wrote_finding:
                 self._value_cell(ws, row, 1, "یافته‌ای خارج از PASS ثبت نشد.")
+                row += 1
+
+        reconciliation = getattr(analysis, "statistical_reconciliation", None)
+        if reconciliation is not None:
+            from local_office_ai.excel.statistical_reconciliation import STATUS_FA
+
+            row += 1
+            self._section(ws, row, "تطبیق آماری و صحت محاسبات (PASS/WARNING/FAIL)", 5)
+            row += 1
+            counts = reconciliation.counts()
+            self._value_cell(ws, row, 1, "وضعیت کلی تطبیق")
+            self._value_cell(
+                ws, row, 2, STATUS_FA.get(reconciliation.status, reconciliation.status.value)
+            )
+            self._fill(
+                ws.cell(row, 2),
+                {"PASS": GREEN, "WARNING": YELLOW, "FAIL": RED}.get(
+                    reconciliation.status.value, GREY
+                ),
+            )
+            self._value_cell(
+                ws,
+                row,
+                3,
+                f"PASS {counts.get('PASS', 0)} / WARNING {counts.get('WARNING', 0)} / "
+                f"FAIL {counts.get('FAIL', 0)} / هشدارهای موتور "
+                f"{len(reconciliation.warnings)}",
+            )
+            ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=5)
+            row += 1
+            wrote = False
+            for warning in reconciliation.warnings:
+                wrote = True
+                self._value_cell(ws, row, 1, "هشدار موتور تطبیق")
+                self._value_cell(ws, row, 2, "—")
+                self._value_cell(ws, row, 3, "هشدار")
+                self._value_cell(ws, row, 4, "")
+                self._value_cell(ws, row, 5, warning)
+                self._fill(ws.cell(row, 3), YELLOW)
+                row += 1
+            for item in [
+                *reconciliation.reconciliations,
+                *reconciliation.comparisons,
+                *reconciliation.averages,
+            ]:
+                if item.status.value == "PASS":
+                    continue
+                wrote = True
+                self._value_cell(
+                    ws,
+                    row,
+                    1,
+                    getattr(item, "kind_label", "میانگین وزنی"),
+                )
+                self._value_cell(
+                    ws,
+                    row,
+                    2,
+                    getattr(item, "label", "") or getattr(item, "metric", "") or "—",
+                )
+                self._value_cell(ws, row, 3, STATUS_FA.get(item.status, item.status.value))
+                expected = getattr(item, "expected", None)
+                if expected is None:
+                    expected = getattr(item, "value", None)
+                if expected is None:
+                    change = getattr(item, "change", None)
+                    expected = getattr(change, "current", "") if change is not None else ""
+                self._value_cell(ws, row, 4, expected)
+                self._value_cell(ws, row, 5, item.explanation)
+                self._fill(
+                    ws.cell(row, 3),
+                    {"PASS": GREEN, "WARNING": YELLOW, "FAIL": RED}.get(item.status.value, GREY),
+                )
+                row += 1
+            if not wrote:
+                self._value_cell(ws, row, 1, "تطبیق آماری خارج از PASS ثبت نشد.")
                 row += 1
 
         ws.freeze_panes = "A5"

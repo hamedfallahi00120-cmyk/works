@@ -1,12 +1,13 @@
-# Next Agent Start Here — Prompt 02A
+# Next Agent Start Here — Prompt 02B
 
 ## Repository and starting point
 
 - Repository: `hamedfallahi00120-cmyk/works` (private).
 - Accepted Phase-0 base on `main`: `6df625659c97c0b7da1f78f33fa5fc37864a7580`.
 - Prompt 01A was merged to `main` as PR #4; `main` was at `f572c47`.
-- Prompt 01B was merged to `main` as PR #5; `main` is at `113cc1f`.
-- Dedicated Prompt 02A branch: `feature/prompt-02a-semantic-quality`.
+- Prompt 01B was merged to `main` as PR #5; `main` was at `113cc1f`.
+- Prompt 02A was merged to `main` as PR #6; `main` is at `d173465`.
+- Dedicated Prompt 02B branch: `feature/prompt-02b-statistical-reconciliation`.
 - The three original administrative source files and the private sample workbook are
   intentionally not stored in GitHub.
 
@@ -20,29 +21,36 @@ and merged. See the Prompt 01A section in `docs/quality_evidence.md` and
 `docs/prompt_01a_technical_report.md`. Prompt 01B has its own
 `docs/prompt_01b_technical_report.md`.
 
-**Prompt 02A — Semantic Classification and Data Quality Validation — is implemented
-on `feature/prompt-02a-semantic-quality`.** It adds `semantic_vocabulary`,
-`semantic_classification` and `data_quality`, protects numeric identifiers from becoming
-measures, records `PASS`/`WARNING`/`FAIL` findings with their locations, and writes the
-audit-only «نقش‌های معنایی» and «کیفیت داده (تفصیلی)» sheets. The branch is local and is
-not merged or pushed to `main`. See `docs/prompt_02a_technical_report.md`.
+Prompt 02A was merged to `main` as PR #6. **Prompt 02B — Statistical Reconciliation
+and Calculation Integrity — is implemented on
+`feature/prompt-02b-statistical-reconciliation`.** It adds
+`statistical_reconciliation.py`, validates component/subtotal/group/monthly/cross-period
+relationships without summing unrelated rows, records `PASS`/`WARNING`/`FAIL` with
+expected, calculated, difference, tolerance, explanation and sources, and writes the
+audit-only «تطبیق آماری و صحت محاسبات» sheet. Percentage columns are not summed as
+counts; missing weights, incomplete/missing months and missing declared totals are
+reported; an unusable period matrix adds a warning. Explicit hierarchy and category
+APIs cover structures a flat table cannot prove. The branch is local and is not merged
+or pushed to `main`. See `docs/quality_evidence.md` for the implementation record.
 
-Recorded sandbox evidence:
+Recorded sandbox evidence (Linux, CPython 3.13.15, pytest 9.2.0):
 
 ```text
-python -m pytest tests/test_semantic_quality.py -o addopts="" -q
--> 23 passed in 1.35s
+python -m pytest tests/test_statistical_reconciliation.py -o addopts="" -q
+-> 36 passed in 3.36s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 223 passed, 2 skipped, 36 deselected, 1 xfailed in 25.58s
+-> 259 passed, 2 skipped, 36 deselected, 1 xfailed in 29.21s
 ```
 
 The `xfailed` result is T9. The 36 deselected tests are `requires_sample`; their private
-workbook is absent and they are not counted as passing.
+workbook is absent and they are not counted as passing. The two skips are the PySide6 GUI
+tests (`libEGL.so.1` is unavailable in this sandbox) and are not counted as passing.
 
 ## Start procedure
 
-1. Fetch the private repository and switch to `feature/prompt-02a-semantic-quality`.
+1. Fetch the private repository and switch to
+   `feature/prompt-02b-statistical-reconciliation`.
 2. Verify the current branch, HEAD SHA and clean working tree. Record the exact output.
 3. Read, in this order:
    - `MASTER_PROJECT_HANDOVER_PUBLIC.txt`
@@ -52,9 +60,9 @@ workbook is absent and they are not counted as passing.
    - this file
 4. Use the Phase-0 audit as the accepted baseline. Do not demand that the owner resend
    these files, repeat the audit, or perform another exploratory phase.
-5. Prompt 01A, Prompt 01B and Prompt 02A are complete. Do not repeat them or substitute
-   audit Phase 1a for them. The next engineering action starts only after the owner
-   accepts Prompt 02A.
+5. Prompt 01A, Prompt 01B, Prompt 02A and Prompt 02B are complete. Do not repeat them or
+   substitute audit Phase 1a for them. The next engineering action starts only after the
+   owner accepts Prompt 02B.
 6. Work only on a dedicated branch for the next stage. Never commit directly to `main`.
 7. Keep later prompts out of scope until the owner authorizes them. Do not merge or push
    to `main`.
