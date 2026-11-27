@@ -362,27 +362,36 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
   an atomic temp file and checked as a valid DOCX package.
 - `reporting/generator.py` — `ReportGenerator.plan` selects exactly one writer
   (`ExcelReportWriter` or `DocxTemplateRenderer`) and `generate` routes to it.
-  `RunResult.report` carries the `ReportGenerationResult`.
+  `RunResult.report` carries the `ReportGenerationResult`. `ReportTemplate.inspect(...)`
+  is a convenience alias for `inspect_docx_template`.
 - `app/workflow.py` / `coordinator.py` / `ui/cli.py` — `--format`, `--template` and
   `--inspect-template`; the workflow resolves the intent before analysis, so a Word
   request without a template fails before any output is written. `settings.report_format`
-  and `settings.docx_template` provide defaults. `app/folder_workflow.py` and
+  and `settings.docx_template` provide defaults; the configured template applies only to
+  Word output, so it cannot break an Excel run, while an explicit `--template` with a
+  non-Word format is rejected. `app/folder_workflow.py` and
   `app/document_set_workflow.py` are Excel-only and reject DOCX/PDF requests with an
-  explicit error.
+  explicit error; the CLI also rejects `--folder --template`.
 - `excel/report_writer.py`, `excel/mixed_report_writer.py` and
   `FolderReportWriter.build_folder` validate `.xlsx` at the writer boundary, so a
   mismatched suffix cannot reach a workbook writer.
-- `tests/test_report_output_formats.py` (19 tests) uses real openpyxl workbooks and real
+- `tests/test_report_output_formats.py` (23 tests) uses real openpyxl workbooks and real
   python-docx templates: format tokens/suffixes, explicit/suffix/request/default routing,
   conflicts, extension validation, PDF rejection, template inspection (layout, margins,
   styles, headings, tables, headers/footers, numbering, RTL), placeholder detection across
   body/table/header/footer, style/layout preservation after rendering, unknown
-  placeholders, missing/corrupt/unsupported templates, template/data separation and CLI
-  DOCX generation. T9 now passes normally; its strict xfail marker was removed.
+  placeholders, missing/corrupt/unsupported templates, template/data separation, a
+  configured Word template that must not break Excel output, a folder run that rejects
+  `--template`, zero-valued request answers, template preservation when an output name
+  would collide with the old temp name, and CLI DOCX generation. Input-file extensions
+  (`report.docx`, «فایل docx») are not mistaken for output requests. T9 now passes
+  normally; its strict xfail marker was removed.
 - Known limits: this stage defines the contract and a placeholder renderer, not the full
   professional DOCX layout writer. A template is required for Word output. A placeholder
   that crosses a run containing a tab, line break or field is left untouched and warned.
-  Folder and multi-source reports remain XLSX-only. PDF is recognised but not generated.
+  Placeholders inside hyperlinks, text boxes, footnotes or comments are not rewritten;
+  body paragraphs, table cells and headers/footers are covered. Folder and multi-source
+  reports remain XLSX-only. PDF is recognised but not generated.
 
 ### Instructions for the next AI agent
 

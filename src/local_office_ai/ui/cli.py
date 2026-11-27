@@ -165,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
             request=request,
             output=args.output,
             output_format=args.output_format,
-            template=_resolve_cli_template(settings, args.template),
+            template=args.template,
             profile=profile,
             confirm_structure=confirm,
         )
@@ -212,11 +212,16 @@ def _validate_cli_output(settings, args, *, profile: str, request: str | None) -
         if args.output
         else settings.temp_dir / f"report-validation{intent.output_format.extension}"
     )
+    explicit_template = args.template or None
+    if explicit_template is None and intent.output_format is not OutputFormat.DOCX:
+        template_path = None
+    else:
+        template_path = _resolve_cli_template(settings, explicit_template)
     specification = ReportSpecification(
         output_format=intent.output_format,
         output_path=output_path,
         profile=profile,
-        template_path=_resolve_cli_template(settings, args.template),
+        template_path=template_path,
         request=request or "",
         evidence=intent.evidence,
     )
@@ -267,6 +272,12 @@ def _inspect_template(path: Path) -> int:
 def _run_folder(settings, args, profile: str) -> int:
     from local_office_ai.app.folder_workflow import FolderWorkflow
 
+    if args.template:
+        print(
+            "خطا: گزارش پوشه فقط به صورت کارپوشه Excel تولید می‌شود و از قالب Word پشتیبانی نمی‌کند.",
+            file=sys.stderr,
+        )
+        return 2
     folder = Path(args.folder)
     if not folder.is_dir():
         print(f"خطا: پوشه پیدا نشد: {folder}", file=sys.stderr)

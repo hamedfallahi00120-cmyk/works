@@ -118,9 +118,13 @@ _FORMAT_WORDS = {
     OutputFormat.XLSX: r"(?:excel|xlsx|اکسل)",
     OutputFormat.PDF: r"(?:pdf|پی\s*دی\s*اف)",
 }
-_OUTPUT_CONTEXT_BEFORE = r"(?:گزارش|خروجی|سند|مدرک|نسخه|قالب|تهیه|تولید|ساخت|بساز|بده)"
-_OUTPUT_CONTEXT_AFTER = r"(?:بساز|تولید|خروجی|بده|تهیه|می\s*خواهم|میخوام|لازم|می‌خواهم)"
-_STRONG_TOKENS = {"docx", "xlsx", "pdf"}
+_OUTPUT_CONTEXT_BEFORE = (
+    r"(?:گزارش|خروجی|سند|مدرک|نسخه|قالب|تهیه|تولید|ساخت|بساز|بده|تبدیل|درخواست)"
+)
+_OUTPUT_CONTEXT_AFTER = (
+    r"(?:(?:را|رو)\s+)?(?:بساز|تولید|خروجی|بده|تهیه|می\s*خواهم|میخوام|لازم|می‌خواهم|تبدیل)"
+)
+_OUTPUT_CONTEXT_FILLER = r"(?:به|در|با|صورت|قالب|فرمت|را|رو|یک|برای|جهت|مخصوص)"
 
 
 @dataclass(frozen=True)
@@ -143,6 +147,26 @@ class OutputIntent:
         }
 
 
+def _is_input_reference(text: str, start: int, end: int) -> bool:
+    """A file name or an input verb must not be read as an output request."""
+
+    before = text[:start]
+    after = text[end:]
+    if before.endswith((".", "/", "\\")):
+        return True
+    if re.search(
+        r"(?:فایل|فايل|input|ورودی|منبع|پیوست|ضمیمه|بارگذاری|آپلود)\s*$",
+        before,
+    ) and not re.search(rf"^{_OUTPUT_CONTEXT_AFTER}", after.strip()):
+        return True
+    return bool(
+        re.search(
+            r"^[\s]*(?:را|رو)?\s*(?:تحلیل|بررسی|بخوان|بازکن|باز\s+کن|خلاصه|استخراج)",
+            after,
+        )
+    )
+
+
 def detect_requested_formats(text: str | None) -> list[OutputFormat]:
     """Find explicit output-format requests in a Persian/English request."""
 
@@ -153,15 +177,14 @@ def detect_requested_formats(text: str | None) -> list[OutputFormat]:
     found: list[OutputFormat] = []
     for output_format, word in _FORMAT_WORDS.items():
         patterns = [
-            rf"{_OUTPUT_CONTEXT_BEFORE}\s*(?:به\s*)?(?:قالب\s*)?{word}",
+            rf"{_OUTPUT_CONTEXT_BEFORE}(?:\s+{_OUTPUT_CONTEXT_FILLER}){{0,3}}?\s*{word}",
             rf"{word}\s*{_OUTPUT_CONTEXT_AFTER}",
         ]
         matched = any(re.search(pattern, normalized) for pattern in patterns)
-        if not matched and output_format is not OutputFormat.PDF:
-            matched = re.search(rf"(?<![\w]){re.escape(output_format.value)}(?![\w])", normalized) is not None
         if not matched:
-            for token in _STRONG_TOKENS:
-                if token == output_format.value and re.search(rf"(?<![\w]){token}(?![\w])", normalized):
+            token = re.escape(output_format.value)
+            for token_match in re.finditer(rf"(?<![\w]){token}(?![\w])", normalized):
+                if not _is_input_reference(normalized, token_match.start(), token_match.end()):
                     matched = True
                     break
         if matched:

@@ -38,6 +38,14 @@ def _safe_key(value: str) -> str:
     return "".join(char if char.isalnum() or char in "._-" else "_" for char in value).strip("_")
 
 
+def _cell_address(sheet: Any, address: Any) -> str:
+    sheet_text = str(sheet or "").strip()
+    address_text = str(address or "").strip()
+    if sheet_text and address_text:
+        return f"{sheet_text}!{address_text}"
+    return address_text
+
+
 @dataclass
 class ReportSpecification:
     """What to generate, where, and with which presentation profile."""
@@ -53,7 +61,9 @@ class ReportSpecification:
         if not isinstance(self.output_format, OutputFormat):
             self.output_format = OutputFormat.from_token(str(self.output_format)) or OutputFormat.XLSX
         self.output_path = Path(self.output_path).expanduser()
-        if self.template_path is not None:
+        if self.template_path is None or str(self.template_path).strip() == "":
+            self.template_path = None
+        else:
             self.template_path = Path(self.template_path).expanduser()
         if not self.output_path.suffix:
             self.output_path = self.output_path.with_suffix(self.output_format.extension)
@@ -276,10 +286,13 @@ class ReportContent:
             sources = list(getattr(calculation, "sources", []) or [])
             if sources:
                 first = sources[0]
-                address = f"{getattr(first, 'sheet', '')}!{getattr(first, 'address', '')}".strip("!")
+                address = _cell_address(
+                    getattr(first, "sheet", ""),
+                    getattr(first, "address", ""),
+                )
             add(
                 f"metric.{name}",
-                str(getattr(calculation, "label", name)),
+                str(getattr(calculation, "label", "") or name),
                 getattr(calculation, "value", None),
                 unit=str(getattr(calculation, "unit", "") or ""),
                 source="calculation",
@@ -292,10 +305,10 @@ class ReportContent:
                 continue
             if getattr(column, "is_identifier", False) or getattr(column, "is_temporal_key", False):
                 continue
-            letter = _safe_key(str(getattr(column, "letter", "")))
+            letter = _safe_key(str(getattr(column, "letter", "") or ""))
             if not letter:
                 continue
-            header = str(getattr(column, "header", letter))
+            header = str(getattr(column, "header", "") or letter)
             for field_name, label in (
                 ("total", "جمع"),
                 ("mean", "میانگین"),
@@ -311,21 +324,32 @@ class ReportContent:
                     f"{header} - {label}",
                     value,
                     source="statistics",
-                    source_address=f"{getattr(generic, 'table_sheet', '')}!{letter}",
+                    source_address=_cell_address(
+                        getattr(generic, "table_sheet", ""),
+                        letter,
+                    ),
                 )
 
         for index, answer in enumerate(list(getattr(analysis, "request_answers", []) or []), start=1):
             add(f"answer.{index}.title", "عنوان پاسخ", getattr(answer, "title", ""), source="request_answer")
-            add(f"answer.{index}.value", "مقدار پاسخ", getattr(answer, "value", "") or None, source="request_answer")
+            answer_value = getattr(answer, "value", None)
+            add(
+                f"answer.{index}.value",
+                "مقدار پاسخ",
+                answer_value,
+                source="request_answer",
+                available=answer_value is not None and str(answer_value) != "",
+            )
             add(f"answer.{index}.text", "متن پاسخ", getattr(answer, "text", ""), source="request_answer")
 
         warnings = list(getattr(analysis, "warnings", []) or [])
         for index, warning in enumerate(warnings, start=1):
-            add(f"warning.{index}", "هشدار", warning, source="warning")
+            add(f"warning.{index}", "هشدار", str(warning), source="warning")
         anomalies = list(getattr(analysis, "anomalies", []) or [])
         for index, anomaly in enumerate(anomalies, start=1):
             message = getattr(anomaly, "message", "")
-            severity = getattr(getattr(anomaly, "severity", None), "value", "")
+            severity_raw = getattr(anomaly, "severity", "")
+            severity = getattr(severity_raw, "value", severity_raw) or ""
             add(f"issue.{index}", f"مورد نیازمند بررسی ({severity})", message, source="anomaly")
 
         sections: list[ReportSection] = [
@@ -360,7 +384,7 @@ class ReportContent:
         if answer_rows:
             sections.append(ReportSection("پاسخ درخواست", answer_rows))
         if warnings:
-            sections.append(ReportSection("هشدارها", [ReportRow("هشدار", item) for item in warnings]))
+            sections.append(ReportSection("هشدارها", [ReportRow("هشدار", str(item)) for item in warnings]))
 
         return cls(
             title=report_title,

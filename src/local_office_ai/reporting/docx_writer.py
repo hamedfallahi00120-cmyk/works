@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import zipfile
+from uuid import uuid4
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -164,7 +165,7 @@ class DocxTemplateRenderer:
     @staticmethod
     def _save_atomic(document: Any, output: Path) -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
-        temp = output.with_name(output.stem + ".tmp" + output.suffix)
+        temp = output.with_name(f".{output.stem}.{uuid4().hex}.tmp{output.suffix}")
         try:
             document.save(str(temp))
             if not zipfile.is_zipfile(temp):

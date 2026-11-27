@@ -257,6 +257,12 @@ class ReportTemplate:
     def placeholder_keys(self) -> tuple[str, ...]:
         return tuple(sorted({item.key for item in self.placeholders}))
 
+    @classmethod
+    def inspect(cls, path: Path | str, **kwargs: Any) -> "ReportTemplate":
+        """Inspect a DOCX template without treating its figures as data."""
+
+        return inspect_docx_template(path, **kwargs)
+
     @property
     def is_data_source(self) -> bool:
         """A template is presentation only; historical figures never become data."""

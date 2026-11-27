@@ -6,6 +6,7 @@ actual Excel/DOCX writers.  Nothing is mocked.
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,6 +29,7 @@ from local_office_ai.reporting import (
     ReportContent,
     ReportGenerator,
     ReportSpecification,
+    ReportTemplate,
     ReportValue,
     detect_requested_formats,
     ensure_extension_matches,
@@ -129,7 +131,20 @@ def test_output_intent_uses_explicit_suffix_request_or_default(tmp_path):
     assert resolve_output_intent(request_text="گزارش Word بده").output_format is OutputFormat.DOCX
     assert resolve_output_intent(request_text="خروجی PDF لازم دارم").output_format is OutputFormat.PDF
     assert resolve_output_intent(request_text="گزارش مدیریتی بده").output_format is OutputFormat.XLSX
+    assert resolve_output_intent(request_text="گزارش به صورت Word").output_format is OutputFormat.DOCX
+    assert resolve_output_intent(request_text="خروجی به فرمت docx").output_format is OutputFormat.DOCX
+    assert resolve_output_intent(request_text="گزارش را به Word تبدیل کن").output_format is OutputFormat.DOCX
+    assert resolve_output_intent(request_text="فایل docx را بده").output_format is OutputFormat.DOCX
+    assert resolve_output_intent(request_text="گزارش Word برای اکسل").output_format is OutputFormat.DOCX
+    assert resolve_output_intent(request_text="گزارش برای Word").output_format is OutputFormat.DOCX
+    assert resolve_output_intent(request_text="گزارش برای اکسل").output_format is OutputFormat.XLSX
     assert detect_requested_formats("این فایل اکسل را تحلیل کن") == []
+    assert detect_requested_formats("این فایل report.docx را تحلیل کن") == []
+    assert detect_requested_formats("فایل docx را بررسی کن") == []
+    assert detect_requested_formats("docx را تحلیل کن") == []
+    assert detect_requested_formats("report.xlsx") == []
+    assert detect_requested_formats("docx") == [OutputFormat.DOCX]
+    assert detect_requested_formats("فایل docx بساز") == [OutputFormat.DOCX]
 
 
 def test_specification_appends_the_selected_suffix(tmp_path, docx_template):
@@ -244,6 +259,7 @@ def test_docx_template_inspection_records_layout_styles_tables_and_rtl(docx_temp
 
 def test_placeholder_detection_spans_body_table_header_and_footer(docx_template):
     template = inspect_docx_template(docx_template)
+    assert ReportTemplate.inspect(docx_template).placeholder_keys == template.placeholder_keys
 
     assert set(template.placeholder_keys) == {
         "report.title",
@@ -298,6 +314,25 @@ def test_template_rendering_preserves_styles_layout_and_rtl(docx_template, templ
     assert table.cell(1, 1).text == "9,999"
     assert rendered.sections[0].header.paragraphs[0].text == "سرصفحه گزارش آزمون"
     assert rendered.sections[0].footer.paragraphs[0].text == "تاریخ 1404/01/01"
+
+
+def test_renderer_keeps_a_template_that_matches_the_old_temp_name(tmp_path):
+    template_path = tmp_path / "report.tmp.docx"
+    document = Document()
+    document.add_paragraph("{{report.title}}")
+    document.save(template_path)
+    before = template_path.read_bytes()
+
+    content = ReportContent(
+        title="گزارش",
+        values={"report.title": ReportValue("report.title", "عنوان", "گزارش")},
+    )
+    output = tmp_path / "report.docx"
+    DocxTemplateRenderer().render(ReportTemplate.inspect(template_path), content, output)
+
+    assert template_path.read_bytes() == before
+    assert output.exists()
+    assert "گزارش" in Document(str(output)).paragraphs[0].text
 
 
 def test_unknown_placeholders_are_left_untouched_and_warned(docx_template, tmp_path):
@@ -370,6 +405,28 @@ def test_report_content_preserves_small_decimal_values():
     content = ReportContent.from_analysis(analysis)
 
     assert content.placeholder_values()["metric.ratio"] == "0.004"
+
+
+def test_report_content_keeps_zero_answer_available():
+    analysis = SimpleNamespace(
+        meta=SimpleNamespace(path="answer.xlsx"),
+        primary_table=None,
+        integration=None,
+        calculations=[],
+        generic=None,
+        request_answers=[
+            SimpleNamespace(title="اختلاف", value=0, text="هیچ اختلافی وجود ندارد")
+        ],
+        anomalies=[],
+        warnings=[],
+    )
+
+    content = ReportContent.from_analysis(analysis)
+
+    value = content.values["answer.1.value"]
+    assert value.value == "0"
+    assert value.available is True
+    assert content.validate() == []
 
 
 def test_missing_and_unsupported_templates_are_rejected(tmp_path):
@@ -468,6 +525,58 @@ def test_cli_generates_a_word_report_with_a_template(project_root, make_workbook
     text = "\n".join(paragraph.text for paragraph in document.paragraphs)
     assert "costs.xlsx" in text
     assert document.paragraphs[0].style.name == "Heading 1"
+
+
+def test_configured_word_template_does_not_break_excel_output(project_root, make_workbook, docx_template):
+    (project_root / "config" / "settings.json").write_text(
+        json.dumps({"docx_template": str(docx_template)}),
+        encoding="utf-8",
+    )
+    source = make_workbook(
+        "costs.xlsx",
+        {
+            "هزینه‌ها": [
+                ["جدول هزینه‌های جاری"],
+                [],
+                ["ردیف", "شرح", "مبلغ"],
+                [1, "اجاره", 1250000],
+            ]
+        },
+    )
+    output = project_root / "excel-report.xlsx"
+    code = main(
+        [
+            "--root",
+            str(project_root),
+            "--file",
+            str(source),
+            "--no-ai",
+            "--yes",
+            "--quiet",
+            "--format",
+            "xlsx",
+            "--output",
+            str(output),
+        ]
+    )
+    assert code == 0
+    assert output.exists()
+
+
+def test_cli_rejects_word_template_for_folder(project_root, tmp_path, capsys):
+    code = main(
+        [
+            "--root",
+            str(project_root),
+            "--folder",
+            str(tmp_path),
+            "--template",
+            str(tmp_path / "template.docx"),
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "قالب Word" in captured.err
 
 
 def test_cli_rejects_pdf_and_mismatched_output(project_root, make_workbook):

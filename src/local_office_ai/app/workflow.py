@@ -177,11 +177,17 @@ class ExcelIntelligenceWorkflow:
                     source,
                     extension=intent.output_format.extension,
                 )
+            if options.template:
+                template_path = self._resolve_template_path(options.template)
+            elif intent.output_format is OutputFormat.DOCX:
+                template_path = self._resolve_template_path(None)
+            else:
+                template_path = None
             specification = ReportSpecification(
                 output_format=intent.output_format,
                 output_path=output_path,
                 profile=profile,
-                template_path=self._resolve_template_path(options.template),
+                template_path=template_path,
                 request=request_text,
                 evidence=intent.evidence,
             )

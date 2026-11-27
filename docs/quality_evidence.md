@@ -637,7 +637,8 @@ Branch: `feature/prompt-04a-output-format-docx-template`, created from `main` at
 - `app/workflow.py`, `app/coordinator.py`, `ui/cli.py`: `--format`, `--template` and
   `--inspect-template`; intent is resolved before analysis, so a Word request without a
   template fails before writing output. `settings.report_format` and
-  `settings.docx_template` provide defaults.
+  `settings.docx_template` provide defaults; the configured template applies only to
+  Word output, and `--folder --template` is rejected.
 - `app/folder_workflow.py` and `app/document_set_workflow.py` are Excel-only and reject
   DOCX/PDF requests with a clear error.
 - `excel/report_writer.py`, `excel/mixed_report_writer.py` and
@@ -648,16 +649,34 @@ Branch: `feature/prompt-04a-output-format-docx-template`, created from `main` at
 - T9 (`test_output_suffix_is_validated`) now passes normally; its strict xfail marker was
   removed.
 
+### Verification pass
+
+- `detect_requested_formats` now treats `report.docx`, «فایل docx» and «docx را تحلیل کن»
+  as input references, not output requests, while «گزارش Word»، «خروجی به فرمت docx» and
+  «فایل docx را بده» still select DOCX. A bare `docx` token remains an explicit request.
+- `settings.docx_template` is used only for DOCX output; a configured template no longer
+  makes an XLSX run fail. An explicit `--template` with XLSX/PDF is still rejected, and
+  `--folder --template` is rejected because folder reports are XLSX-only.
+- `ReportContent.from_analysis` preserves a zero-valued request answer as `"0"` instead
+  of turning it into «در دسترس نبود».
+- `ReportTemplate.inspect(path)` is a convenience alias for `inspect_docx_template`, and
+  source addresses are built without stray `!`/`None` segments.
+- DOCX output uses a unique temporary file, so a template named like the old temp path
+  (`report.tmp.docx`) is never overwritten.
+- `tests/test_report_output_formats.py` now has 23 tests; the new cases cover configured
+  template isolation, folder template rejection, zero answers, input-file references and
+  template preservation during atomic output.
+
 ### Test evidence [SBX]
 
 Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
 
 ```text
 python -m pytest tests/test_report_output_formats.py -o addopts="" -q
--> 19 passed in 1.06s (exit 0)
+-> 23 passed in 1.08s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 320 passed, 2 skipped, 36 deselected in 36.95s (exit 0)
+-> 324 passed, 2 skipped, 36 deselected in 36.91s (exit 0)
 ```
 
 `tests/test_report_output_formats.py` uses real openpyxl workbooks and real python-docx
@@ -665,7 +684,9 @@ templates. It covers the seven required areas: output-format selection, file-ext
 validation, DOCX template inspection, style/layout preservation after rendering,
 placeholder detection across body/table/header/footer, missing/corrupt/unsupported
 templates, and rejection of mismatched output formats. It also checks template/data
-separation, unknown placeholders, PDF rejection and CLI DOCX generation with a template.
+separation, unknown placeholders, PDF rejection, configured-template isolation, folder
+template rejection, zero-valued answers, input-file references and CLI DOCX generation
+with a template.
 
 ### Not validated
 
@@ -674,3 +695,5 @@ separation, unknown placeholders, PDF rejection and CLI DOCX generation with a t
 - The full professional DOCX layout writer is intentionally out of scope; this stage
   implements the contract and template-mode placeholder rendering.
 - Folder and multi-source reports remain XLSX-only. PDF is recognised but not generated.
+- Placeholders inside hyperlinks, text boxes, footnotes or comments are not rewritten;
+  body paragraphs, table cells and headers/footers are covered.

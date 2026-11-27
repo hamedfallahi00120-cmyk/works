@@ -43,7 +43,9 @@ profile writes «تطبیق معنایی منابع», and the folder report wri
 `OutputFormat`/intent resolution, `ReportSpecification`/`ReportContent`,
 `inspect_docx_template`, `DocxTemplateRenderer` and `ReportGenerator`. Word output is
 template-only and never falls back to Excel; PDF is recognised but not generated. The
-CLI exposes `--format`, `--template` and `--inspect-template`. T9 is fixed.
+CLI exposes `--format`, `--template` and `--inspect-template`. T9 is fixed. A
+configured `settings.docx_template` applies only to Word output and cannot break Excel;
+an explicit `--template` with a non-Word format, or with `--folder`, is rejected.
 
 Recorded sandbox evidence (Linux, CPython 3.13.15, pytest 9.2.0):
 
@@ -52,10 +54,10 @@ python -m pytest tests/test_semantic_matching.py -o addopts="" -q
 -> 23 passed in 2.11s
 
 python -m pytest tests/test_report_output_formats.py -o addopts="" -q
--> 19 passed in 1.06s
+-> 23 passed in 1.08s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 320 passed, 2 skipped, 36 deselected in 36.95s
+-> 324 passed, 2 skipped, 36 deselected in 36.91s
 ```
 
 The 36 deselected tests are `requires_sample`; their private workbook is absent and they
