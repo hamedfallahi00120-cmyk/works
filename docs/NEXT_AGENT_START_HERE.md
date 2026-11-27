@@ -52,6 +52,16 @@ Do not rely on historical test counts; collection changes with Python, PySide6 a
 
 T2, T3 and T9 are temporarily marked `xfail(strict=True)` because their defects are known and intentionally not fixed in this preparation stage. This is not a claim that they pass. If Prompt 01A genuinely fixes any of them, remove that test's xfail marker and require a normal pass. T4 is a normal passing guard; the audit did not reproduce R5.
 
+## CI execution policy
+
+The repository workflow is intentionally PR-only:
+- One Windows/Python 3.14.7 test run starts when a PR is opened.
+- A new run starts only when that PR's commit changes (`synchronize`) or the PR is reopened.
+- Documentation-only changes outside the CI path list do not start the test suite.
+- There is **no `push` trigger on `main`** and no test run is subscribed to the PR merge/close event. Therefore merging an already tested PR does not repeat the suite.
+- One invocation of pytest is used. Tests marked `requires_sample` are excluded; there is no second collection run or artifact upload.
+- Do not interpret this as “never test changed code”: each new source/test/dependency/workflow snapshot in a PR must be validated once before merge.
+
 ## Fixed project constraints
 
 - Python is the source of truth for extraction, numerical calculations and validation.
