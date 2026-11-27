@@ -6,9 +6,10 @@
 
 سورس پایه ابتدا از بستهٔ `Local-Office-AI_UI_UX_Refined.zip` وارد شاخهٔ `main` شد
 (مبنای ممیزی: `6df625659c97c0b7da1f78f33fa5fc37864a7580`). گزارش Phase 0 و آماده‌سازی
-مرحله بعد در شاخهٔ `fix/multisource-extraction-integrity` نگهداری می‌شود. شاخهٔ شروع
-مهندسی Prompt 01A برابر `feature/prompt-01a-data-model-metadata` است؛ `main` نباید
-مستقیماً تغییر کند. این مخزن خصوصی است و فایل‌های اداری واقعی در آن قرار نمی‌گیرند.
+مرحله بعد در شاخهٔ `fix/multisource-extraction-integrity` نگهداری می‌شود. Prompt 01A
+در PR #4 در `main` ادغام شد و شاخهٔ مهندسی Prompt 01B برابر
+`feature/prompt-01b-multiblock-extraction` است؛ `main` نباید مستقیماً تغییر کند. این
+مخزن خصوصی است و فایل‌های اداری واقعی در آن قرار نمی‌گیرند.
 
 ### منبع و دامنه
 
@@ -84,14 +85,15 @@ python -m pytest tests -o addopts="" -q
 - تست‌های ویندوزی (پنل شناور always-on-top، System Tray، GPU از `nvidia-smi`/LibreHardwareMonitor)
   روی Linux قابل تأیید نیستند و در گزارش‌های `docs/` هم به‌عنوان تأییدنشده ثبت شده‌اند.
 
-### شروع کار برای AI بعدی — Prompt 01A
+### شروع کار برای AI بعدی — Prompt 01B
 
 Phase 0 قبلاً انجام و مستند شده است. برای شروع، `docs/NEXT_AGENT_START_HERE.md`
-را دنبال کنید. شاخهٔ شروع `feature/prompt-01a-data-model-metadata` است.
+را دنبال کنید. شاخهٔ شروع `feature/prompt-01b-multiblock-extraction` است.
 
 عامل بعدی باید مستندات موجود را بخواند و فقط branch/HEAD/working tree را تأیید کند؛
-نیازی به اجرای مجدد ممیزی Phase 0 یا درخواست دوبارهٔ handover/audit ندارد. سپس متن
-اصلی Prompt 01A را که مالک پروژه ارائه می‌کند اجرا کند. Prompt 01A هنوز اجرا نشده است.
+نیازی به اجرای مجدد ممیزی Phase 0 یا درخواست دوبارهٔ handover/audit ندارد. Prompt 01A
+اجرا و در `main` ادغام شده است و Prompt 01B روی شاخهٔ اختصاصی خود اجرا شده است.
+مرحلهٔ بعدی فقط پس از پذیرش Prompt 01B توسط مالک پروژه آغاز می‌شود.
 
 برای اجرای gate عمومی تست‌ها (بدون فایل مرجع محرمانه):
 

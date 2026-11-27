@@ -24,6 +24,7 @@ INTERNAL_SHEETS = {
     "نمونه‌های GPU",
     "داده خام",
     "داده استانداردشده",
+    "بلوک‌های استخراج",
     "ردیابی منبع",
     "روش‌شناسی آماری",
     "نتایج محاسبات",
@@ -119,7 +120,9 @@ def test_audit_profile_keeps_traceability(monthly_workbook, folder_settings, tmp
         monthly_workbook, use_ai=False, output=output, profile="audit"
     )
     workbook = openpyxl.load_workbook(result.output_path)
-    assert {"داده خام", "ردیابی منبع", "گزارش عملکرد"} <= set(workbook.sheetnames)
+    assert {"داده خام", "ردیابی منبع", "گزارش عملکرد", "بلوک‌های استخراج"} <= set(
+        workbook.sheetnames
+    )
     workbook.close()
 
 

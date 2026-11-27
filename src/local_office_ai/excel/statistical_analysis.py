@@ -23,7 +23,7 @@ from local_office_ai.excel.normalization import (
     gregorian_to_jalali,
     parse_value,
 )
-from local_office_ai.excel.sheet_analyzer import SheetGrid
+from local_office_ai.excel.sheet_analyzer import SheetGrid, summary_label_role
 
 ZERO = Decimal("0")
 HUNDRED = Decimal("100")
@@ -1181,9 +1181,13 @@ class _TableChannel:
         self.empty_rows = 0
         self.truncated = table.row_count > max_rows
         last_row = min(table.last_data_row, table.first_data_row + max_rows - 1)
+        subtotal_rows = set(table.subtotal_rows)
         for row in range(table.first_data_row, last_row + 1):
+            if row in subtotal_rows:
+                continue
             parsed_cells: list[tuple[Any, Any, str]] = []
             total_row = False
+            row_label = ""
             row_errors = 0
             row_numeric_invalid = 0
             for column in table.columns:
@@ -1198,11 +1202,17 @@ class _TableChannel:
                 if parsed.kind is ValueKind.EMPTY:
                     continue
                 key = f"{column.letter}:{column.header or column.letter}"
-                if parsed.kind in (ValueKind.TEXT, ValueKind.BOOLEAN):
-                    text = str(parsed.value).strip()
-                    if text and _looks_like_total(text):
-                        total_row = True
+                if not row_label and parsed.kind in (ValueKind.TEXT, ValueKind.BOOLEAN):
+                    row_label = str(parsed.value).strip()
                 parsed_cells.append((column, parsed, key))
+            if row_label and summary_label_role(row_label) in {
+                "total",
+                "subtotal",
+                "difference",
+                "percentage",
+                "note",
+            }:
+                total_row = True
             if total_row:
                 continue
             if not parsed_cells:
@@ -1234,11 +1244,7 @@ class _TableChannel:
 
 
 def _looks_like_total(text: str) -> bool:
-    from local_office_ai.excel.normalization import normalize_digits, normalize_text
-
-    value = normalize_text(normalize_digits(text)).lower().strip(" :.-")
-    exact = {"جمع", "جمع کل", "مجموع", "مجموع کل", "کل", "total", "grand total", "sum"}
-    return value in exact or value.startswith(("جمع ", "مجموع ", "جمع‌کل", "total ", "sum "))
+    return summary_label_role(text) in {"total", "subtotal", "difference", "percentage"}
 
 
 def _percentile(values: list[Decimal], p: Decimal) -> Decimal:

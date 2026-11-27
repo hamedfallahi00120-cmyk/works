@@ -162,6 +162,7 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
         "workbook_profile": lambda self, wb, context: self._workbook_profile(wb, context.analysis),
         "data_dictionary": lambda self, wb, context: self._data_dictionary(wb, context.analysis),
         "fields": lambda self, wb, context: self._fields_sheet(wb, context.analysis),
+        "blocks": lambda self, wb, context: self._blocks_sheet(wb, context.analysis),
         "coverage": lambda self, wb, context: self._coverage_sheet(wb, context.analysis),
         "metadata_warnings": lambda self, wb, context: self._metadata_warnings_sheet(wb, context.analysis),
         "period_comparison": lambda self, wb, context: self._period_comparison_sheet(wb, context.analysis),
@@ -222,7 +223,7 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
 
         audit_tail = ["workbook_profile", "ai"]
         if analysis.intelligence is not None:
-            audit_tail.extend(["fields", "coverage", "metadata_warnings"])
+            audit_tail.extend(["fields", "blocks", "coverage", "metadata_warnings"])
             audit_tail.extend(["period_comparison", "reconciliation_sheet"])
         if getattr(analysis, "extraction", None) is not None:
             audit_tail.append("extraction")

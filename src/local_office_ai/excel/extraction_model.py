@@ -55,7 +55,11 @@ from local_office_ai.excel.period_detection import (
     looks_like_year,
     scalar_conflicts,
 )
-from local_office_ai.excel.sheet_analyzer import SheetGrid
+from local_office_ai.excel.row_classification import (
+    classify_block_rows,
+    summary_rows_from_roles,
+)
+from local_office_ai.excel.sheet_analyzer import SheetGrid, summary_label_role
 
 DEFAULT_MAX_CELLS_PER_BLOCK = 4000
 DEFAULT_MAX_ROW_LABEL_SCAN = 300
@@ -211,6 +215,8 @@ class BlockModel:
     confidence: float
     reasons: list[str] = field(default_factory=list)
     cells_truncated: bool = False
+    row_roles: list[dict[str, Any]] = field(default_factory=list)
+    summary_rows: dict[str, list[int]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -224,6 +230,8 @@ class BlockModel:
             "merged_ranges": [item.to_dict() for item in self.merged_ranges],
             "cells": [cell.to_dict() for cell in self.cells],
             "cells_truncated": self.cells_truncated,
+            "row_roles": list(self.row_roles),
+            "summary_rows": {key: list(value) for key, value in self.summary_rows.items()},
             "periods": list(self.periods),
             "period_evidence": list(self.period_evidence),
             "period_status": self.period_status,
@@ -490,6 +498,8 @@ class ExtractionModelBuilder:
                 text = cell_text(cell.value)
                 if not text:
                     continue
+                if summary_label_role(text):
+                    continue
                 if self._column_is_temporal(table, col) and looks_like_year(text):
                     sources.append(
                         PeriodSource(SOURCE_ROW_LABEL, text, address=_cell_address(row, col))
@@ -572,6 +582,10 @@ class ExtractionModelBuilder:
             )
             for column in table.columns
         ]
+        block_end = table.block_end
+        row_roles = classify_block_rows(
+            grid, table, header_rows, block_end_row=block_end
+        )
         cells, truncated = self._cells(grid, table, header_rows, max_cells)
         block = BlockModel(
             block_id=block_id,
@@ -580,6 +594,7 @@ class ExtractionModelBuilder:
             title=table.title,
             boundaries={
                 "address": table.address,
+                "block_address": table.block_address,
                 "header_row": table.header_row,
                 "first_col": get_column_letter(table.first_col),
                 "last_col": get_column_letter(table.last_col),
@@ -587,6 +602,9 @@ class ExtractionModelBuilder:
                 "last_col_index": table.last_col,
                 "first_data_row": table.first_data_row,
                 "last_data_row": table.last_data_row,
+                "block_end_row": block_end,
+                "subtotal_rows": list(table.subtotal_rows),
+                "grand_total_rows": list(table.grand_total_rows),
                 "header_rows": header_rows,
                 "row_count": table.row_count,
                 "column_count": len(table.columns),
@@ -596,7 +614,7 @@ class ExtractionModelBuilder:
             merged_ranges=self._merged_ranges(
                 grid,
                 min(header_rows),
-                table.last_data_row,
+                block_end,
                 table.first_col,
                 table.last_col,
             ),
@@ -609,6 +627,8 @@ class ExtractionModelBuilder:
             confidence=table.confidence,
             reasons=list(table.reasons),
             cells_truncated=truncated,
+            row_roles=[record.to_dict() for record in row_roles],
+            summary_rows=summary_rows_from_roles(row_roles),
         )
         return block, own_sources
 
@@ -622,7 +642,7 @@ class ExtractionModelBuilder:
         records: list[CellRecord] = []
         truncated = False
         first_row = min(header_rows)
-        for row in range(first_row, table.last_data_row + 1):
+        for row in range(first_row, table.block_end + 1):
             for col in range(table.first_col, table.last_col + 1):
                 cell = grid.get(row, col)
                 span = grid.merged_span(row, col)

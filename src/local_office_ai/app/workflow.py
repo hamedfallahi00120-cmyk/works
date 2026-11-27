@@ -21,6 +21,7 @@ from local_office_ai.core.models import (
     Anomaly,
     AuditStatus,
     ColumnRole,
+    DataRole,
     RunResult,
     Severity,
     TableCandidate,
@@ -35,6 +36,11 @@ from local_office_ai.excel.extraction_model import ExtractionModelBuilder
 from local_office_ai.excel.reader import WorkbookReader
 from local_office_ai.excel.reconciliation import Reconciler
 from local_office_ai.excel.report_writer import ExcelReportWriter, ReportContext
+from local_office_ai.excel.row_classification import (
+    classify_block_rows,
+    role_counts,
+    summary_rows_from_roles,
+)
 from local_office_ai.excel.sheet_analyzer import SheetGrid
 from local_office_ai.excel.statistical_analysis import StatisticalAnalyzer
 from local_office_ai.excel.structure_intelligence import StructureIntelligenceAnalyzer
@@ -47,6 +53,10 @@ from local_office_ai.monitoring.performance_report import build_performance_repo
 from local_office_ai.monitoring.resource_monitor import ResourceMonitor
 
 LOGGER = get_logger(__name__)
+
+
+def _decimal_text(value: Any) -> str | None:
+    return None if value is None else str(value)
 
 
 @dataclass
@@ -285,15 +295,31 @@ class ExcelIntelligenceWorkflow:
                     sheet_generic = StatisticalAnalyzer(self.settings).analyze(
                         grids[sheet_meta.title], sheet_primary, goal=goal
                     )
+            all_sheet_tables = structure.tables + structure.key_value_tables
             intel = structure_engine.inspect_sheet(
                 grids[sheet_meta.title],
                 sheet_meta,
-                structure.tables + structure.key_value_tables,
+                all_sheet_tables,
                 sheet_primary,
                 generic=sheet_generic,
                 known_sheets=known_sheets,
                 source_name=Path(bundle.path).name,
             )
+            intel.block_analyses = self._build_block_analyses(
+                grids[sheet_meta.title],
+                all_sheet_tables,
+                sheet_primary=sheet_primary,
+                sheet_generic=sheet_generic,
+                global_primary=primary,
+                global_generic=analysis.generic,
+                goal=goal,
+            )
+            intel.block_relationships = self._block_relationships(all_sheet_tables)
+            if len(intel.block_analyses) > 1:
+                intel.warnings.append(
+                    f"{len(intel.block_analyses)} بلوک مستقل در این برگه شناسایی و جدا تحلیل شد؛ "
+                    "هیچ بلوکی فقط به دلیل کوچک‌تر بودن کنار گذاشته نشد."
+                )
             sheet_intelligence.append(intel)
         analysis.sheets = sheet_intelligence
         analysis.intelligence = structure_engine.finalize(str(meta.path), sheet_intelligence)
@@ -509,6 +535,157 @@ class ExcelIntelligenceWorkflow:
             return value
 
         return max(usable, key=score)
+
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _analyzable_tables(tables: list[TableCandidate]) -> list[TableCandidate]:
+        result: list[TableCandidate] = []
+        seen: set[int] = set()
+        for table in tables:
+            if is_report_sheet(table.sheet):
+                continue
+            if table.row_count < 1 or len(table.columns) < 1:
+                continue
+            if id(table) in seen:
+                continue
+            seen.add(id(table))
+            result.append(table)
+        return result
+
+    def _build_block_analyses(
+        self,
+        grid: SheetGrid,
+        tables: list[TableCandidate],
+        *,
+        sheet_primary: TableCandidate | None,
+        sheet_generic: Any,
+        global_primary: TableCandidate | None,
+        global_generic: Any,
+        goal: str | None,
+    ) -> list[dict[str, Any]]:
+        """Analyze every valid block on the sheet, not only the best one."""
+        analyses: list[dict[str, Any]] = []
+        for index, table in enumerate(self._analyzable_tables(tables), start=1):
+            if table is sheet_primary:
+                generic = sheet_generic
+            elif global_primary is not None and table is global_primary:
+                generic = global_generic
+            else:
+                generic = StatisticalAnalyzer(self.settings).analyze(grid, table, goal=goal)
+            headers = list(table.header_rows or [table.header_row])
+            roles = classify_block_rows(
+                grid, table, headers, block_end_row=table.block_end
+            )
+            analyses.append(
+                {
+                    "block_id": f"{table.sheet}#B{index}",
+                    "address": table.address,
+                    "block_address": table.block_address,
+                    "kind": table.kind.value,
+                    "title": table.title,
+                    "header_row": table.header_row,
+                    "first_data_row": table.first_data_row,
+                    "last_data_row": table.last_data_row,
+                    "block_end_row": table.block_end,
+                    "row_count": table.row_count,
+                    "column_count": len(table.columns),
+                    "confidence": round(table.confidence, 4),
+                    "is_primary": table is global_primary,
+                    "is_sheet_primary": table is sheet_primary,
+                    "measures": [
+                        column.header
+                        for column in table.columns
+                        if column.statistical_role
+                        in {DataRole.NUMERIC_MEASURE, DataRole.CALCULATED}
+                    ],
+                    "row_role_counts": role_counts(roles),
+                    "summary_rows": summary_rows_from_roles(roles),
+                    "statistics": self._block_statistics(generic),
+                    "warnings": list(getattr(generic, "warnings", []) or []),
+                }
+            )
+        return analyses
+
+    @staticmethod
+    def _block_statistics(generic: Any) -> list[dict[str, Any]]:
+        if generic is None:
+            return []
+        statistics: list[dict[str, Any]] = []
+        for column in getattr(generic, "columns", []) or []:
+            if not getattr(column, "is_numeric", False):
+                continue
+            if getattr(column, "is_identifier", False) or getattr(column, "is_temporal_key", False):
+                continue
+            statistics.append(
+                {
+                    "header": column.header,
+                    "letter": column.letter,
+                    "count": column.count,
+                    "missing": column.missing,
+                    "distinct": column.distinct,
+                    "total": _decimal_text(column.total),
+                    "mean": _decimal_text(column.mean),
+                    "median": _decimal_text(column.median),
+                    "minimum": _decimal_text(column.minimum),
+                    "maximum": _decimal_text(column.maximum),
+                }
+            )
+        return statistics
+
+    @staticmethod
+    def _block_relationships(tables: list[TableCandidate]) -> list[dict[str, Any]]:
+        """Link blocks only when their own headers or periods provide evidence."""
+        candidates = ExcelIntelligenceWorkflow._analyzable_tables(tables)
+        relationships: list[dict[str, Any]] = []
+        for left_index, left in enumerate(candidates):
+            for right_index in range(left_index + 1, len(candidates)):
+                right = candidates[right_index]
+                if left.sheet != right.sheet:
+                    continue
+                left_signature = tuple(
+                    column.parent_header or column.header
+                    for column in left.columns
+                    if column.role not in {ColumnRole.ID, ColumnRole.DATE}
+                )
+                right_signature = tuple(
+                    column.parent_header or column.header
+                    for column in right.columns
+                    if column.role not in {ColumnRole.ID, ColumnRole.DATE}
+                )
+                adjacent = abs(right.header_row - left.block_end) <= 3
+                if left_signature and left_signature == right_signature:
+                    relationships.append(
+                        {
+                            "kind": "shared_header_signature",
+                            "blocks": [
+                                f"{left.sheet}#B{left_index + 1}",
+                                f"{right.sheet}#B{right_index + 1}",
+                            ],
+                            "adjacent": adjacent,
+                            "note": (
+                                "این دو بلوک سرستون یکسان دارند؛ احتمال ادامه یا تکرار همان جدول است، "
+                                "اما داده‌هایشان جدا نگه داشته شد."
+                            ),
+                        }
+                    )
+                    continue
+                left_periods = {column.period for column in left.columns if column.period}
+                right_periods = {column.period for column in right.columns if column.period}
+                if left_periods and left_periods == right_periods:
+                    relationships.append(
+                        {
+                            "kind": "shared_period",
+                            "blocks": [
+                                f"{left.sheet}#B{left_index + 1}",
+                                f"{right.sheet}#B{right_index + 1}",
+                            ],
+                            "adjacent": adjacent,
+                            "note": (
+                                "این دو بلوک دوره یکسان دارند؛ رابطه فقط ثبت شد و جمع خودکار انجام نشد."
+                            ),
+                        }
+                    )
+        return relationships
 
     # ------------------------------------------------------------------ #
     def _stage(self, name: str):
