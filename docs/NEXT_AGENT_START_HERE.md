@@ -39,10 +39,10 @@ Recorded sandbox evidence (Linux, CPython 3.13.15, pytest 9.2.0):
 
 ```text
 python -m pytest tests/test_semantic_matching.py -o addopts="" -q
--> 23 passed in 2.12s
+-> 23 passed in 2.11s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 278 passed, 6 skipped, 36 deselected, 1 xfailed in 31.12s
+-> 278 passed, 6 skipped, 36 deselected, 1 xfailed in 31.66s
 ```
 
 The `xfailed` result is T9. The 36 deselected tests are `requires_sample`; their private

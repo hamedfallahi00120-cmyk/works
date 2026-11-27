@@ -438,13 +438,13 @@ PR #8 open, not merged to `main`. Base: `main` at `891b662` (PR #7 merged).
   `1403-1404`) and embedded dates in headers (`تعداد پرونده 1403/04`).
   Persian/Arabic-Indic digits are normalized first. A month name paired with a year
   from the other calendar (`تیر 2024`, `July 1403`) is not a period. An exact bare
-  year is accepted
-  inside the converter band (1178–1633 Jalali, 1700–2200 Gregorian); a bare year
-  embedded in a short title is limited to 1300–1500 Jalali / 1900–2100 Gregorian.
-  A long free-text cell and a code such as `کد 1234` are not periods; `ردیف 12` is
-  not a period. A multi-month phrase without an ordinal (`سه ماهه 1403`) or several
-  non-consecutive month names (`مرداد و مهر 1403`) yields no period, never a bare
-  year. The matcher consumes the finalized `SheetIntelligence.periods`, so a month
+  year is accepted inside the converter band (1178–1633 Jalali, 1700–2200
+  Gregorian); a bare year embedded in a short title is limited to 1300–1500 Jalali /
+  1900–2100 Gregorian. A long free-text cell and a code such as `کد 1234` are not
+  periods; `ردیف 12` is not a period. A code number next to a real year is ignored,
+  and multiple plausible years yield no period. A multi-month phrase without an
+  ordinal (`سه ماهه 1403`) or several non-consecutive month names (`مرداد و مهر
+  1403`) yields no period, never a bare year. The matcher consumes the finalized `SheetIntelligence.periods`, so a month
   block title under a year-only sheet name becomes `مرداد 1404`; if only a bare year
   remains for a month title, the period is `not_detected` rather than equated with
   another month or invented. `compare_period_sets` returns an explained relationship
@@ -508,10 +508,10 @@ Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
 
 ```text
 python -m pytest tests/test_semantic_matching.py -o addopts="" -q
--> 23 passed in 2.12s (exit 0)
+-> 23 passed in 2.11s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 278 passed, 6 skipped, 36 deselected, 1 xfailed in 31.12s (exit 0)
+-> 278 passed, 6 skipped, 36 deselected, 1 xfailed in 31.66s (exit 0)
 ```
 
 The single `xfailed` outcome remains T9 (output suffix validation). The 36 deselected

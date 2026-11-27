@@ -199,12 +199,13 @@ truncated.
   `1403/01/01-1403/03/31` and `1403-1404`) and dates embedded in headers
   (`تعداد پرونده 1403/04`). Persian/Arabic-Indic digits are normalized first. A
   month name paired with a year from the other calendar (`تیر 2024`, `July 1403`) is
-  not a period. An exact
-  bare year counts inside the converter band (1178–1633 Jalali, 1700–2200 Gregorian);
-  a bare year embedded in a title is limited to 1300–1500 Jalali / 1900–2100
-  Gregorian. A long free-text cell, `ردیف 12` and `کد 1234` are not periods. A
-  multi-month phrase without an ordinal (`سه ماهه 1403`) or non-consecutive month
-  names (`مرداد و مهر 1403`) yields no period, never a bare year. Comparison returns
+  not a period. An exact bare year counts inside the converter band (1178–1633
+  Jalali, 1700–2200 Gregorian); a bare year embedded in a title is limited to
+  1300–1500 Jalali / 1900–2100 Gregorian. A long free-text cell, `ردیف 12` and
+  `کد 1234` are not periods; a code number next to a real year is ignored, and
+  multiple plausible years yield no period. A multi-month phrase without an ordinal
+  (`سه ماهه 1403`) or non-consecutive month names (`مرداد و مهر 1403`) yields no
+  period, never a bare year. Comparison returns
   an explained relation (`equivalent`, `contains`, `within`, `overlapping`,
   `incompatible`, `unknown`) with real overlap dates. No period is invented.
 - `excel/semantic_matching.py` — controlled cross-source matching. `SourceField` keeps

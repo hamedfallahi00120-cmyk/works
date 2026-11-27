@@ -372,12 +372,24 @@ def _clean(text: Any) -> str:
     return normalize_text(normalize_digits(str(text or ""))).strip()
 
 
+def _single_embedded_year(text: str) -> int | None:
+    """The one plausible administrative year in a label, ignoring code numbers."""
+    plausible = {
+        int(match.group(1))
+        for match in _FOUR_DIGIT_YEAR.finditer(text)
+        if 1300 <= int(match.group(1)) <= 1500
+        or 1900 <= int(match.group(1)) <= 2100
+    }
+    if len(plausible) != 1:
+        return None
+    return next(iter(plausible))
+
+
 def _parse_ordinal_range(text: str, source: str) -> NormalizedPeriod | None:
     """``سه‌ماهه اول 1403``, ``نیمه دوم 1403``, ``فصل 2 1403`` and seasons."""
-    year_match = _FOUR_DIGIT_YEAR.search(text)
-    if year_match is None:
+    year = _single_embedded_year(text)
+    if year is None:
         return None
-    year = int(year_match.group(1))
     calendar_name = _resolve_year(year)
     if calendar_name == CALENDAR_UNKNOWN:
         return None
@@ -481,10 +493,9 @@ def _named_months_range(
 
 
 def _parse_named_month(text: str, source: str) -> NormalizedPeriod | None:
-    year_match = _FOUR_DIGIT_YEAR.search(text)
-    if year_match is None:
+    year = _single_embedded_year(text)
+    if year is None:
         return None
-    year = int(year_match.group(1))
     calendar_name = _resolve_year(year)
     if calendar_name == CALENDAR_UNKNOWN:
         return None
