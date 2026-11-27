@@ -8,7 +8,8 @@
 - Prompt 01B was merged to `main` as PR #5; `main` was at `113cc1f`.
 - Prompt 02A was merged to `main` as PR #6; `main` was at `d173465`.
 - Prompt 02B was merged to `main` as PR #7; `main` is at `891b662`.
-- Dedicated Prompt 03A branch: `feature/prompt-03a-semantic-source-matching`.
+- Dedicated Prompt 03A branch: `feature/prompt-03a-semantic-source-matching`; PR #8 is open
+  and is not merged to `main`.
 - The three original administrative source files and the private sample workbook are
   intentionally not stored in GitHub.
 

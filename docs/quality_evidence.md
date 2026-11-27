@@ -27,7 +27,7 @@ the end of this file.
 | Prompt 01B | Implemented and merged as PR #5 (evidence at end) |
 | Prompt 02A | Implemented and merged as PR #6 (evidence at end) |
 | Prompt 02B | Implemented and merged as PR #7 (evidence at end) |
-| Prompt 03A | Implemented on `feature/prompt-03a-semantic-source-matching` (evidence at end) |
+| Prompt 03A | Implemented on `feature/prompt-03a-semantic-source-matching`; PR #8 open (evidence at end) |
 | Production source fixes in the preparation baseline | None; Prompts 01A, 01B, 02A, 02B and 03A add production source changes (below) |
 
 ## Evidence labels
@@ -424,8 +424,8 @@ absent and they are not counted as passing. The two skips are the PySide6 GUI te
 
 ## Prompt 03A — Semantic Source Matching and Period Alignment
 
-Status: implemented on `feature/prompt-03a-semantic-source-matching`; not merged or
-pushed to `main` in this session. Base: `main` at `891b662` (PR #7 merged).
+Status: implemented on `feature/prompt-03a-semantic-source-matching`; branch pushed and
+PR #8 open, not merged to `main`. Base: `main` at `891b662` (PR #7 merged).
 
 ### What was added
 
