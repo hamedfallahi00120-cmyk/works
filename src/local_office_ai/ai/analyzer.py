@@ -75,9 +75,7 @@ class AIAnalyzer:
             )
         statistical = getattr(analysis, "statistical_reconciliation", None)
         if statistical is not None:
-            mismatch_exists = mismatch_exists or any(
-                item.status.value == "FAIL" for item in statistical.reconciliations
-            )
+            mismatch_exists = mismatch_exists or statistical.status.value == "FAIL"
 
         if not use_ai:
             return self._offline(facts, meta, reason="تحلیل مدل به‌درخواست کاربر غیرفعال شد.")

@@ -458,6 +458,7 @@ def _reconciliation_facts(analysis: AnalysisResult) -> dict[str, Any] | None:
     return {
         "status": report.status.value,
         "counts": report.counts(),
+        "warnings": list(report.warnings),
         "reconciliations": [
             {
                 "kind": item.kind,
@@ -484,6 +485,9 @@ def _reconciliation_facts(analysis: AnalysisResult) -> dict[str, Any] | None:
                 "percent": _num(item.change.percent),
                 "direction": item.change.direction,
                 "months_used": item.months_used,
+                "months_missing": item.months_missing,
+                "incomplete_excluded": item.incomplete_excluded,
+                "explanation": item.explanation,
             }
             for item in report.comparisons[:12]
         ],
@@ -494,7 +498,10 @@ def _reconciliation_facts(analysis: AnalysisResult) -> dict[str, Any] | None:
                 "value": _num(item.value),
                 "unweighted": _num(item.unweighted),
                 "weighted": _num(item.weighted),
+                "weights_required": item.weights_required,
+                "weights_available": item.weights_available,
                 "weighted_used": item.weighted_used,
+                "observations": item.observations,
                 "explanation": item.explanation,
             }
             for item in report.averages[:8]
@@ -938,8 +945,10 @@ def allowed_numbers(analysis: AnalysisResult) -> set[str]:
             for value in (item.value, item.unweighted, item.weighted):
                 if isinstance(value, Decimal):
                     allowed.add(canonical_number(value))
+            allowed.add(str(item.observations))
         for count in statistical.counts().values():
             allowed.add(str(count))
+        allowed.add(str(len(statistical.warnings)))
     for loan in analysis.loans:
         for value in (loan.principal, loan.installment, loan.installment_count, loan.contract_repayment):
             if isinstance(value, Decimal):

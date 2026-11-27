@@ -27,21 +27,25 @@ and Calculation Integrity — is implemented on
 `statistical_reconciliation.py`, validates component/subtotal/group/monthly/cross-period
 relationships without summing unrelated rows, records `PASS`/`WARNING`/`FAIL` with
 expected, calculated, difference, tolerance, explanation and sources, and writes the
-audit-only «تطبیق آماری و صحت محاسبات» sheet. The branch is local and is not merged or
-pushed to `main`. See `docs/quality_evidence.md` for the implementation record.
+audit-only «تطبیق آماری و صحت محاسبات» sheet. Percentage columns are not summed as
+counts; missing weights, incomplete/missing months and missing declared totals are
+reported; an unusable period matrix adds a warning. Explicit hierarchy and category
+APIs cover structures a flat table cannot prove. The branch is local and is not merged
+or pushed to `main`. See `docs/quality_evidence.md` for the implementation record.
 
-Recorded sandbox evidence:
+Recorded sandbox evidence (Linux, CPython 3.13.15, pytest 9.2.0):
 
 ```text
 python -m pytest tests/test_statistical_reconciliation.py -o addopts="" -q
--> 24 passed in 1.67s
+-> 36 passed in 3.36s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 243 passed, 6 skipped, 36 deselected, 1 xfailed in 26.84s
+-> 259 passed, 2 skipped, 36 deselected, 1 xfailed in 29.21s
 ```
 
 The `xfailed` result is T9. The 36 deselected tests are `requires_sample`; their private
-workbook is absent and they are not counted as passing.
+workbook is absent and they are not counted as passing. The two skips are the PySide6 GUI
+tests (`libEGL.so.1` is unavailable in this sandbox) and are not counted as passing.
 
 ## Start procedure
 

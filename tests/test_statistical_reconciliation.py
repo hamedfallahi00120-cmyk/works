@@ -70,7 +70,14 @@ def _payload(summary: str) -> str:
     )
 
 
-def _monthly_book(path, months, *, include_declared: bool = True):
+def _monthly_book(
+    path,
+    months,
+    *,
+    include_declared: bool = True,
+    skip_last_days: dict[str, int] | None = None,
+    empty_months: set[str] | None = None,
+):
     """A two-year monthly workbook with numeric (not formula) total rows."""
 
     workbook = openpyxl.Workbook()
@@ -85,16 +92,20 @@ def _monthly_book(path, months, *, include_declared: bool = True):
         sheet.merge_cells("D4:E4")
         sheet["D5"] = "1403"
         sheet["E5"] = "1404"
+        if name in (empty_months or set()):
+            sheet["B5"] = "جمع"
+            continue
         days = expected_days(month_no)
-        for day in range(1, days + 1):
+        written_days = days - (skip_last_days or {}).get(name, 0)
+        for day in range(1, written_days + 1):
             sheet.cell(5 + day, 2, day)
             sheet.cell(5 + day, 3, day)
             sheet.cell(5 + day, 4, base)
             sheet.cell(5 + day, 5, base + 100)
-        total_row = 5 + days + 1
+        total_row = 5 + written_days + 1
         sheet.cell(total_row, 2, "جمع")
-        sheet.cell(total_row, 4, base * days if include_declared else None)
-        sheet.cell(total_row, 5, (base + 100) * days if include_declared else None)
+        sheet.cell(total_row, 4, base * written_days if include_declared else None)
+        sheet.cell(total_row, 5, (base + 100) * written_days if include_declared else None)
     workbook.save(path)
     return path
 
@@ -181,6 +192,34 @@ def test_subtotal_to_grand_total_uses_subtotals_not_data_rows(settings, make_wor
     assert grand[0].expected == Decimal("800")
     assert grand[0].calculated == Decimal("800")
     assert {component["role"] for component in grand[0].components} == {ROLE_SUBTOTAL}
+
+
+def test_grand_total_includes_data_after_the_last_subtotal(settings, make_workbook):
+    path = make_workbook(
+        "subtotal_and_trailing_data.xlsx",
+        {
+            "هزینه‌ها": [
+                ["شرح", "مبلغ"],
+                ["گروه الف", None],
+                ["اجاره", 100],
+                ["برق", 100],
+                ["جمع گروه", 200],
+                ["آب", 300],
+                ["گاز", 200],
+                ["جمع کل", 700],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    grand = _reconciliations(analysis, KIND_SUBTOTAL_GRAND_TOTAL)
+    assert len(grand) == 1
+    assert grand[0].status is PASS
+    assert grand[0].expected == Decimal("700")
+    assert grand[0].calculated == Decimal("700")
+    assert {component["role"] for component in grand[0].components} == {
+        ROLE_SUBTOTAL,
+        ROLE_DATA,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -295,6 +334,42 @@ def test_mixed_units_are_not_summed():
     assert result.evidence.mixed_units == ["تومان", "ریال"]
 
 
+def test_component_total_without_expected_is_warning_not_verified():
+    result = reconcile_components(
+        None,
+        [
+            AggregationComponent("الف", Decimal("10")),
+            AggregationComponent("ب", Decimal("20")),
+        ],
+    )
+    assert result.status is WARNING
+    assert result.expected is None
+    assert result.calculated == Decimal("30")
+    assert result.difference is None
+    assert not result.verified
+    assert "تأیید نشد" in result.explanation
+
+
+def test_percentage_total_is_not_reconciled_as_a_count(settings, make_workbook):
+    path = make_workbook(
+        "percentage_total.xlsx",
+        {
+            "شاخص‌ها": [
+                ["شرح", "درصد"],
+                ["الف", 10],
+                ["ب", 20],
+                ["جمع کل", 30],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    assert not _reconciliations(analysis, KIND_COMPONENT_TOTAL)
+    averages = analysis.statistical_reconciliation.averages
+    assert averages
+    assert averages[0].status is WARNING
+    assert averages[0].value is None
+
+
 def test_workbook_unit_column_prevents_mixed_unit_sum(settings, make_workbook):
     path = make_workbook(
         "mixed_units.xlsx",
@@ -403,6 +478,66 @@ def test_weighted_average_differs_from_unweighted_when_required():
     assert ordinary.weighted == Decimal("17.5000")
 
 
+def test_successful_ratio_and_zero_weight_failure():
+    ratio = compute_ratio(Decimal("10"), Decimal("4"))
+    assert ratio.status is PASS
+    assert ratio.value == Decimal("2.5000")
+
+    zero_weight = compute_average(
+        [Decimal("10"), Decimal("20")],
+        [Decimal("0"), Decimal("0")],
+        weights_required=True,
+    )
+    assert zero_weight.status is FAIL
+    assert zero_weight.value is None
+    assert zero_weight.weighted_used is False
+
+
+def test_ratio_without_weight_column_is_warning_not_silent(settings, make_workbook):
+    path = make_workbook(
+        "ratio_without_weight.xlsx",
+        {
+            "شاخص‌ها": [
+                ["شرح", "درصد"],
+                ["الف", 10],
+                ["ب", 20],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    averages = analysis.statistical_reconciliation.averages
+    assert averages
+    item = averages[0]
+    assert item.status is WARNING
+    assert item.value is None
+    assert item.weights_required
+    assert not item.weights_available
+    assert "وزن" in item.explanation
+    assert "میانگین ساده" in item.explanation
+    assert analysis.statistical_reconciliation.status is WARNING
+
+
+def test_workbook_ratio_with_ambiguous_weight_columns_is_warning(
+    settings, make_workbook
+):
+    path = make_workbook(
+        "ambiguous_weight.xlsx",
+        {
+            "شاخص‌ها": [
+                ["شرح", "درصد", "تعداد", "مبلغ"],
+                ["الف", 10, 1, 100],
+                ["ب", 20, 3, 300],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    averages = analysis.statistical_reconciliation.averages
+    assert len(averages) == 1
+    assert averages[0].status is WARNING
+    assert averages[0].value is None
+    assert "چند ستون وزن" in averages[0].explanation
+
+
 def test_workbook_ratio_uses_the_available_weight_column(settings, make_workbook):
     path = make_workbook(
         "weighted.xlsx",
@@ -447,6 +582,11 @@ def test_rounding_tolerances_pass_warning_and_fail():
     assert result.difference == Decimal("0.10")
     assert not result.verified
 
+    large = Tolerance.for_workbook(components=1)
+    assert large.classify(Decimal("0.5"), Decimal("1000000")) is PASS
+    assert large.classify(Decimal("5"), Decimal("1000000")) is WARNING
+    assert large.classify(Decimal("11"), Decimal("1000000")) is FAIL
+
 
 # --------------------------------------------------------------------------- #
 # Category and period comparisons
@@ -478,6 +618,18 @@ def test_period_comparison_flags_incomplete_months():
     assert result.status is WARNING
     assert "خرداد" in result.explanation
     assert result.months_used == ["فروردین", "اردیبهشت"]
+
+    missing = compare_periods(
+        current_label="1404",
+        previous_label="1403",
+        current=Decimal("1200"),
+        previous=Decimal("1000"),
+        months_used=["فروردین"],
+        months_missing=["تیر"],
+    )
+    assert missing.status is WARNING
+    assert missing.months_missing == ["تیر"]
+    assert "بدون داده" in missing.explanation
 
 
 def test_monthly_to_period_reconciliation_and_cross_period_comparison(tmp_path, settings):
@@ -514,6 +666,70 @@ def test_overlapping_detector_views_do_not_double_count(tmp_path, settings):
         for item in analysis.statistical_reconciliation.reconciliations
     ]
     assert len(keys) == len(set(keys))
+
+
+def test_monthly_reconciliation_reports_incomplete_months(tmp_path, settings):
+    path = _monthly_book(
+        tmp_path / "monthly_incomplete.xlsx",
+        [("فروردین", 1, 10), ("اردیبهشت", 2, 20)],
+        skip_last_days={"اردیبهشت": 1},
+    )
+    analysis = _analyze(settings, path)
+    monthly = _reconciliations(analysis, KIND_MONTHLY_PERIOD)
+    assert monthly
+    assert all(item.status is WARNING for item in monthly)
+    assert all("ناقص" in item.explanation for item in monthly)
+    assert all("اردیبهشت" in item.explanation for item in monthly)
+    assert all(not item.verified for item in monthly)
+
+
+def test_monthly_reconciliation_reports_missing_declared_totals(tmp_path, settings):
+    path = _monthly_book(
+        tmp_path / "monthly_no_declared.xlsx",
+        [("فروردین", 1, 10), ("اردیبهشت", 2, 20)],
+        include_declared=False,
+    )
+    analysis = _analyze(settings, path)
+    monthly = _reconciliations(analysis, KIND_MONTHLY_PERIOD)
+    assert monthly
+    assert all(item.status is WARNING for item in monthly)
+    assert all(item.calculated is None for item in monthly)
+    assert all("مقدار" in item.explanation for item in monthly)
+
+
+def test_monthly_reconciliation_reports_a_month_without_values(tmp_path, settings):
+    path = _monthly_book(
+        tmp_path / "monthly_empty_month.xlsx",
+        [("فروردین", 1, 10), ("اردیبهشت", 2, 20)],
+        empty_months={"اردیبهشت"},
+    )
+    analysis = _analyze(settings, path)
+    report = analysis.statistical_reconciliation
+    assert report.warnings
+    assert any("تطبیق ماهانه" in warning for warning in report.warnings)
+    assert report.status is WARNING
+
+
+def test_report_without_a_justified_relationship_is_warning_not_pass(
+    settings, make_workbook
+):
+    path = make_workbook(
+        "no_relationship.xlsx",
+        {
+            "هزینه‌ها": [
+                ["شرح", "مبلغ"],
+                ["اجاره", 100],
+                ["برق", 200],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    report = analysis.statistical_reconciliation
+    assert not report.reconciliations
+    assert not report.averages
+    assert not report.comparisons
+    assert report.status is WARNING
+    assert report.warnings
 
 
 # --------------------------------------------------------------------------- #
@@ -598,6 +814,75 @@ def test_clean_profile_renders_period_comparisons_without_a_technical_sheet(
     validation = workbook["اعتبارسنجی داده"]
     values = [str(validation.cell(row, 1).value) for row in range(1, validation.max_row + 1)]
     assert any("تطبیق آماری" in value for value in values)
+    workbook.close()
+
+
+def test_clean_profile_shows_the_no_relationship_warning(
+    settings, make_workbook, tmp_path
+):
+    path = make_workbook(
+        "clean_no_relationship.xlsx",
+        {
+            "هزینه‌ها": [
+                ["شرح", "مبلغ"],
+                ["اجاره", 100],
+                ["برق", 200],
+            ]
+        },
+    )
+    output = tmp_path / "clean_no_relationship_out.xlsx"
+    Coordinator(settings, console=False).run(
+        path, use_ai=False, output=output, profile="clean"
+    )
+    workbook = openpyxl.load_workbook(output)
+    validation = workbook["اعتبارسنجی داده"]
+    values = [
+        str(validation.cell(row, column).value)
+        for row in range(1, validation.max_row + 1)
+        for column in range(1, 6)
+    ]
+    assert any("رابطه جمع قابل توجیه" in value for value in values)
+    workbook.close()
+
+    audit_path = tmp_path / "clean_no_relationship_audit.xlsx"
+    Coordinator(settings, console=False).run(
+        path, use_ai=False, output=audit_path, profile="audit"
+    )
+    audit = openpyxl.load_workbook(audit_path)
+    sheet = audit["تطبیق آماری و صحت محاسبات"]
+    audit_values = [
+        str(sheet.cell(row, column).value)
+        for row in range(1, sheet.max_row + 1)
+        for column in range(1, 12)
+    ]
+    assert any("هشدارهای موتور تطبیق" in value for value in audit_values)
+    assert any("رابطه جمع قابل توجیه" in value for value in audit_values)
+    audit.close()
+
+
+def test_clean_profile_lists_average_warnings(settings, make_workbook, tmp_path):
+    path = make_workbook(
+        "clean_average_warning.xlsx",
+        {
+            "شاخص‌ها": [
+                ["شرح", "درصد"],
+                ["الف", 10],
+                ["ب", 20],
+            ]
+        },
+    )
+    output = tmp_path / "clean_average_warning_out.xlsx"
+    Coordinator(settings, console=False).run(
+        path, use_ai=False, output=output, profile="clean"
+    )
+    workbook = openpyxl.load_workbook(output)
+    validation = workbook["اعتبارسنجی داده"]
+    values = [
+        str(validation.cell(row, column).value)
+        for row in range(1, validation.max_row + 1)
+        for column in range(1, 6)
+    ]
+    assert any("میانگین" in value for value in values)
     workbook.close()
 
 

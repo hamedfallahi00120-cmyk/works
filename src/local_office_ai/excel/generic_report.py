@@ -1059,7 +1059,7 @@ class GenericReportMixin:
             2,
             f"{STATUS_FA.get(report.status, report.status.value)} — "
             f"PASS {counts.get('PASS', 0)}، WARNING {counts.get('WARNING', 0)}، "
-            f"FAIL {counts.get('FAIL', 0)}",
+            f"FAIL {counts.get('FAIL', 0)}، هشدارهای موتور {len(report.warnings)}",
         )
         row += 1
         self._value_cell(ws, row, 1, "اصل محاسبه")
@@ -1071,6 +1071,17 @@ class GenericReportMixin:
             "همه اعداد با Decimal در Python محاسبه شده‌اند؛ مدل زبانی مجاز به محاسبه مجدد نیست.",
         )
         row += 2
+
+        if report.warnings:
+            self._section(ws, row, "هشدارهای موتور تطبیق", 11)
+            row += 1
+            for warning in report.warnings:
+                self._value_cell(ws, row, 1, "هشدار")
+                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=11)
+                self._value_cell(ws, row, 2, warning)
+                self._fill(ws.cell(row, 1), YELLOW)
+                row += 1
+            row += 1
 
         colors = {"PASS": GREEN, "WARNING": YELLOW, "FAIL": RED}
         self._section(ws, row, "تطبیق جمع‌ها، اجزا، جمع میانی، گروه و دوره", 11)

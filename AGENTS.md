@@ -148,29 +148,46 @@ truncated.
 
 - `excel/statistical_reconciliation.py` — deterministic `Decimal` engine for
   component-to-total, subtotal-to-grand-total, group-to-subgroup, monthly-to-period and
-  cross-period checks. `AggregationEvidence` requires distinct, non-overlapping
-  components with one unit; grand-total, subtotal, percentage, difference and note rows
-  are never components. A missing component stays `None` and yields `WARNING`, never
-  zero. `compute_change` records absolute change, percentage change, direction and a
-  zero/missing baseline without dividing by zero. `compute_ratio` and
-  `compute_average` refuse a missing denominator; a weighted average is required when a
-  ratio column and a weight column exist. `Tolerance.for_workbook` derives the rounding
-  tolerance, and every result records expected, calculated, difference, tolerance,
-  `PASS`/`WARNING`/`FAIL`, explanation, sheet, block, measure and source addresses.
+  cross-period checks. `AggregationEvidence` rejects grand-total, subtotal, percentage
+  and difference roles, overlapping category tags and mixed units; note/footer rows are
+  excluded by the shared row classifier. A missing component stays `None` and yields
+  `WARNING`, never zero. `compute_change` records absolute change, percentage change,
+  direction and a zero/missing baseline without dividing by zero. `compute_ratio` and
+  `compute_average` refuse a missing denominator; a ratio column with no detectable
+  weight column yields `WARNING` and no simple mean, and a weighted average is used
+  whenever a weight column exists. `Tolerance.for_workbook` combines rounding and
+  relative tolerance, and every result records expected, calculated, difference,
+  tolerance, `PASS`/`WARNING`/`FAIL`, explanation, sheet, block, measure and source
+  addresses.
 - `app/workflow.py` — reconciliation is built after semantics, quality and the period
   matrix. `AnalysisResult.statistical_reconciliation` is serialized into the processed
   JSON.
 - The audit profile writes «تطبیق آماری و صحت محاسبات»; the clean «اعتبارسنجی داده»
-  sheet shows a compact summary and non-`PASS` reconciliation/comparison findings only.
-- `ai/context_builder.py` includes reconciliation facts and adds every approved value to
-  `allowed_numbers`; `ai/analyzer.py` treats a reconciliation `FAIL` as a real mismatch.
-  Qwen explains recorded results and may not recalculate them.
-- `tests/test_statistical_reconciliation.py` (24 tests) covers the nine required cases
-  with real openpyxl workbooks: correct/incorrect component totals, subtotal/grand total,
-  nested and overlapping categories, zero baseline, missing denominators, weighted
-  versus unweighted averages, rounding tolerances, increase/decrease interpretation,
-  mixed units from a «واحد» column, monthly-to-period reconciliation, cross-period
-  comparison, incomplete months, serialization, output profiles and the AI allow-list.
+  sheet shows a compact summary plus non-`PASS` reconciliation, comparison and average
+  findings and report warnings.
+- `ai/context_builder.py` includes reconciliation facts and warnings and adds every
+  approved value to `allowed_numbers`; `ai/analyzer.py` treats any statistical `FAIL`
+  (reconciliation, comparison or average) as a real mismatch. Qwen explains recorded
+  results and may not recalculate them.
+- `tests/test_statistical_reconciliation.py` (36 tests) covers the nine required cases
+  with real openpyxl workbooks: correct/incorrect component totals, subtotal/grand total
+  (including data after the last subtotal), nested and overlapping categories, zero
+  baseline, missing denominators, weighted versus unweighted averages, rounding
+  tolerances (absolute and relative), increase/decrease interpretation, mixed units from
+  a «واحد» column, percentage totals that must not be reconciled as counts, ambiguous
+  weight columns, monthly-to-period reconciliation, incomplete/empty months, missing
+  declared totals, cross-period comparison, serialization, clean/audit output profiles,
+  warnings and the AI allow-list.
+- Known limits: automatic block reconciliation relies on declared total/subtotal rows
+  and the shared row classifier. A flat table that mixes a parent-category total with
+  its child rows, or overlapping administrative classifications without explicit tags,
+  cannot be proven safe from labels alone; use `reconcile_hierarchy` with
+  `HierarchyNode` or `AggregationComponent.categories` for those structures.
+  `compare_categories` is a deterministic API for aligned category maps; the engine does
+  not infer category pairs from every layout. A ratio column without a detectable weight
+  column, or with more than one possible weight column, yields `WARNING` and no average
+  because the denominator is not certain. An unusable period matrix, or two periods with
+  no common complete month, adds a report warning instead of a silent omission.
 
 ### Instructions for the next AI agent
 
@@ -210,7 +227,8 @@ from the CI gate with `-m "not requires_sample"`; they are not counted as succes
   `semantic_vocabulary.py`, `semantic_classification.py` and `data_quality.py` classify
   field roles and record quality findings before statistics.
   `statistical_reconciliation.py` validates declared totals, groups and periods without
-  summing unrelated rows.
+  summing unrelated rows, and exposes explicit hierarchy/category comparison APIs for
+  structures that cannot be inferred from a flat table.
   `statistical_analysis.py` is the general engine; `generic_report.py` holds the generic
   report sheets as a mixin. `validation.py` holds the 9-check quality checklist.
 - `src/local_office_ai/ai/` — Ollama client, context builder, prompts, response validator,

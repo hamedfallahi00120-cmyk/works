@@ -1014,16 +1014,35 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
                 row,
                 3,
                 f"PASS {counts.get('PASS', 0)} / WARNING {counts.get('WARNING', 0)} / "
-                f"FAIL {counts.get('FAIL', 0)}",
+                f"FAIL {counts.get('FAIL', 0)} / هشدارهای موتور "
+                f"{len(reconciliation.warnings)}",
             )
             ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=5)
             row += 1
             wrote = False
-            for item in [*reconciliation.reconciliations, *reconciliation.comparisons]:
+            for warning in reconciliation.warnings:
+                wrote = True
+                self._value_cell(ws, row, 1, "هشدار موتور تطبیق")
+                self._value_cell(ws, row, 2, "—")
+                self._value_cell(ws, row, 3, "هشدار")
+                self._value_cell(ws, row, 4, "")
+                self._value_cell(ws, row, 5, warning)
+                self._fill(ws.cell(row, 3), YELLOW)
+                row += 1
+            for item in [
+                *reconciliation.reconciliations,
+                *reconciliation.comparisons,
+                *reconciliation.averages,
+            ]:
                 if item.status.value == "PASS":
                     continue
                 wrote = True
-                self._value_cell(ws, row, 1, item.kind_label)
+                self._value_cell(
+                    ws,
+                    row,
+                    1,
+                    getattr(item, "kind_label", "میانگین وزنی"),
+                )
                 self._value_cell(
                     ws,
                     row,
@@ -1031,7 +1050,13 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
                     getattr(item, "label", "") or getattr(item, "metric", "") or "—",
                 )
                 self._value_cell(ws, row, 3, STATUS_FA.get(item.status, item.status.value))
-                self._value_cell(ws, row, 4, item.expected if hasattr(item, "expected") else "")
+                expected = getattr(item, "expected", None)
+                if expected is None:
+                    expected = getattr(item, "value", None)
+                if expected is None:
+                    change = getattr(item, "change", None)
+                    expected = getattr(change, "current", "") if change is not None else ""
+                self._value_cell(ws, row, 4, expected)
                 self._value_cell(ws, row, 5, item.explanation)
                 self._fill(
                     ws.cell(row, 3),

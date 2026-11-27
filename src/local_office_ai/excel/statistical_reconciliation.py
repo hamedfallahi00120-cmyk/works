@@ -1110,6 +1110,11 @@ class StatisticalReconciliationReport:
             return ReconciliationStatus.FAIL
         if ReconciliationStatus.WARNING in statuses:
             return ReconciliationStatus.WARNING
+        if self.warnings:
+            return ReconciliationStatus.WARNING
+        if not statuses:
+            # Nothing was checked, so nothing is verified.
+            return ReconciliationStatus.WARNING
         return ReconciliationStatus.PASS
 
     @property
@@ -1179,6 +1184,27 @@ class StatisticalReconciler:
         report.reconciliations.extend(self._monthly_reconciliations(analysis))
         report.comparisons.extend(self._period_comparisons(analysis))
         report.changes.extend(item.change for item in report.comparisons)
+        integration = getattr(analysis, "integration", None)
+        if (
+            integration is not None
+            and getattr(integration, "series", None)
+            and not getattr(integration, "is_usable", False)
+        ):
+            detail = "؛ ".join(getattr(integration, "warnings", []) or [])
+            report.warnings.append(
+                "تطبیق ماهانه انجام نشد؛ دوره ماهانه برای مقایسه و جمع‌بندی "
+                "قابل استفاده نیست"
+                + (f": {detail}" if detail else ".")
+            )
+        elif (
+            integration is not None
+            and getattr(integration, "is_usable", False)
+            and len(getattr(integration, "periods", []) or []) >= 2
+            and not report.comparisons
+        ):
+            report.warnings.append(
+                "مقایسه بین‌دوره‌ای انجام نشد؛ ماه مشترک و کاملی برای دو دوره پیدا نشد."
+            )
         if not (report.reconciliations or report.comparisons or report.averages):
             report.warnings.append(
                 "رابطه جمع قابل توجیهی برای تطبیق آماری در این فایل پیدا نشد."
@@ -1287,6 +1313,9 @@ class StatisticalReconciler:
         for column, field in sorted(fields.items()):
             if field.role not in MEASURE_ROLES:
                 continue
+            if _is_ratio_field(field):
+                # A percentage, rate or ratio is not a count or an amount.
+                continue
             if not any(profile.index == column for profile in table.columns):
                 continue
             unit = field.unit
@@ -1367,6 +1396,12 @@ class StatisticalReconciler:
                 if prior_subtotals:
                     components = self._components(
                         grid, table, prior_subtotals, column, labels, field, role=ROLE_SUBTOTAL
+                    )
+                    last_subtotal = max(prior_subtotals)
+                    components.extend(
+                        component
+                        for component in data_components
+                        if _row_from_source(component.source) > last_subtotal
                     )
                     kind = KIND_SUBTOTAL_GRAND_TOTAL
                 else:
@@ -1484,35 +1519,104 @@ class StatisticalReconciler:
         weight_fields = [
             field
             for field in fields.values()
-            if field.role in MEASURE_ROLES and _is_weight_field(field)
+            if field.role in MEASURE_ROLES
+            and _is_weight_field(field)
+            and not _is_ratio_field(field)
         ]
-        if not ratio_fields or not weight_fields:
+        if not ratio_fields:
             return []
 
+        headers = list(table.header_rows or [table.header_row])
+        records = classify_block_rows(
+            grid, table, headers, block_end_row=table.block_end
+        )
+        data_roles = {ROW_DATA, ROW_DATA_MISSING, ROW_CATEGORY}
         rows = [
-            row
-            for row in range(table.first_data_row, table.last_data_row + 1)
+            record.row
+            for record in records
+            if record.role in data_roles
+            and table.first_data_row <= record.row <= table.last_data_row
         ]
         results: list[AverageResult] = []
         for ratio in ratio_fields:
-            weight = next(
-                (field for field in weight_fields if field.column != ratio.column),
-                None,
-            )
-            if weight is None:
+            candidates = [
+                field for field in weight_fields if field.column != ratio.column
+            ]
+            if not candidates:
+                if len(rows) >= 2:
+                    results.append(
+                        AverageResult(
+                            value=None,
+                            unweighted=None,
+                            weighted=None,
+                            weights_required=True,
+                            weights_available=False,
+                            weighted_used=False,
+                            status=ReconciliationStatus.WARNING,
+                            explanation=(
+                                "برای این نسبت میانگین وزنی لازم است، اما ستون وزن یا مخرج "
+                                "در جدول پیدا نشد؛ میانگین ساده گزارش نشد."
+                            ),
+                            label=ratio.header or ratio.letter,
+                            unit=ratio.unit,
+                            observations=len(rows),
+                        )
+                    )
                 continue
+            if len(candidates) > 1:
+                if len(rows) >= 2:
+                    names = "، ".join(field.header or field.letter for field in candidates)
+                    results.append(
+                        AverageResult(
+                            value=None,
+                            unweighted=None,
+                            weighted=None,
+                            weights_required=True,
+                            weights_available=True,
+                            weighted_used=False,
+                            status=ReconciliationStatus.WARNING,
+                            explanation=(
+                                "چند ستون وزن یا مخرج احتمالی پیدا شد ("
+                                + names
+                                + ")؛ رابطه نسبت با یک مخرج قطعی نیست و میانگین وزنی "
+                                "محاسبه نشد."
+                            ),
+                            label=ratio.header or ratio.letter,
+                            unit=ratio.unit,
+                            observations=len(rows),
+                        )
+                    )
+                continue
+            weight = candidates[0]
             values: list[Decimal] = []
             weights: list[Decimal | None] = []
             skipped = 0
             for row in rows:
                 value, value_present = self._number(grid, row, ratio.column)
                 mass, mass_present = self._number(grid, row, weight.column)
-                if not value_present:
+                if not value_present or value is None:
                     skipped += 1
                     continue
-                values.append(value if value is not None else ZERO)
+                values.append(value)
                 weights.append(mass if mass_present else None)
             if not values:
+                results.append(
+                    AverageResult(
+                        value=None,
+                        unweighted=None,
+                        weighted=None,
+                        weights_required=True,
+                        weights_available=bool(weights),
+                        weighted_used=False,
+                        status=ReconciliationStatus.WARNING,
+                        explanation=(
+                            "هیچ مقدار معتبری برای این نسبت پیدا نشد؛ میانگین محاسبه نشد."
+                        ),
+                        label=ratio.header or ratio.letter,
+                        unit=ratio.unit,
+                        observations=0,
+                    )
+                )
                 continue
             result = compute_average(
                 values,
@@ -1526,7 +1630,9 @@ class StatisticalReconciler:
                 "میانگین ساده برای این نسبت گزارش نمی‌شود."
             )
             if skipped:
-                note += f" {skipped} ردیف بدون مقدار در محاسبه نیامد."
+                note += f" {skipped} ردیف بدون مقدار معتبر در محاسبه نیامد."
+                if result.status is ReconciliationStatus.PASS:
+                    result.status = ReconciliationStatus.WARNING
             result.explanation += note
             results.append(result)
         return results
@@ -1539,14 +1645,80 @@ class StatisticalReconciler:
         results: list[ReconciliationResult] = []
         for series in integration.series[:12]:
             for period in series.periods():
-                cells = [
-                    cell
-                    for cell in series.cells
-                    if cell.period == period and cell.complete and cell.total is not None
+                period_cells = [
+                    cell for cell in series.cells if cell.period == period
                 ]
-                if not cells:
+                all_cells = [cell for cell in period_cells if cell.total is not None]
+                missing_cells = [cell for cell in period_cells if cell.total is None]
+                if not all_cells:
+                    if period_cells:
+                        results.append(
+                            ReconciliationResult(
+                                kind=KIND_MONTHLY_PERIOD,
+                                status=ReconciliationStatus.WARNING,
+                                expected=None,
+                                calculated=None,
+                                difference=None,
+                                tolerance=Tolerance.for_workbook(components=1),
+                                explanation=(
+                                    f"دوره {period}: هیچ ماهی مقدار عددی ندارد؛ "
+                                    "جمع ماهانه تأیید نشد."
+                                ),
+                                sources=[
+                                    (
+                                        f"{cell.source}!{cell.total_address}"
+                                        if cell.total_address
+                                        else cell.source
+                                    )
+                                    for cell in period_cells
+                                ],
+                                sheet=period_cells[0].source,
+                                block="",
+                                measure=series.metric,
+                                label=f"{series.metric} — {period}",
+                                expected_source=f"جمع ماهانه {period}",
+                            )
+                        )
                     continue
-                if any(cell.declared_total is None for cell in cells):
+                complete_cells = [cell for cell in all_cells if cell.complete]
+                incomplete_cells = [cell for cell in all_cells if not cell.complete]
+                sources = [
+                    (
+                        f"{cell.source}!{cell.total_address}"
+                        if cell.total_address
+                        else cell.source
+                    )
+                    for cell in period_cells
+                ]
+                if not complete_cells:
+                    results.append(
+                        ReconciliationResult(
+                            kind=KIND_MONTHLY_PERIOD,
+                            status=ReconciliationStatus.WARNING,
+                            expected=None,
+                            calculated=None,
+                            difference=None,
+                            tolerance=Tolerance.for_workbook(components=len(all_cells)),
+                            explanation=(
+                                f"دوره {period}: هیچ ماه کاملی برای تطبیق جمع ماهانه وجود ندارد؛ "
+                                "ماه‌های ناقص کنار گذاشته شدند: "
+                                + "، ".join(cell.month for cell in incomplete_cells)
+                                + (
+                                    "؛ ماه بدون مقدار: "
+                                    + "، ".join(cell.month for cell in missing_cells)
+                                    if missing_cells
+                                    else ""
+                                )
+                                + "."
+                            ),
+                            sources=sources,
+                            sheet=all_cells[0].source,
+                            block="",
+                            measure=series.metric,
+                            label=f"{series.metric} — {period}",
+                            expected_source=f"جمع ماهانه {period}",
+                        )
+                    )
                     continue
                 expected = series.total(period)
                 components = [
@@ -1560,7 +1732,7 @@ class StatisticalReconciler:
                             else cell.source
                         ),
                     )
-                    for cell in cells
+                    for cell in complete_cells
                 ]
                 result = reconcile_components(
                     expected,
@@ -1569,12 +1741,33 @@ class StatisticalReconciler:
                     tolerance=Tolerance.for_workbook(components=len(components)),
                     label=f"{series.metric} — {period}",
                     measure=series.metric,
-                    sheet=cells[0].source,
+                    sheet=complete_cells[0].source,
                     expected_source=f"جمع ماهانه {period}",
                 )
-                result.explanation = (
-                    f"دوره {period}: " + result.explanation
-                )
+                notes = [f"دوره {period}: " + result.explanation]
+                if incomplete_cells:
+                    notes.append(
+                        "ماه ناقص از تطبیق کنار گذاشته شد: "
+                        + "، ".join(cell.month for cell in incomplete_cells)
+                        + "."
+                    )
+                    if result.status is ReconciliationStatus.PASS:
+                        result.status = ReconciliationStatus.WARNING
+                if missing_cells:
+                    notes.append(
+                        "ماه بدون مقدار در تطبیق نیامد: "
+                        + "، ".join(cell.month for cell in missing_cells)
+                        + "."
+                    )
+                    if result.status is ReconciliationStatus.PASS:
+                        result.status = ReconciliationStatus.WARNING
+                result.explanation = " ".join(notes)
+                if incomplete_cells or missing_cells:
+                    result.sources.extend(
+                        source
+                        for source in sources
+                        if source not in result.sources
+                    )
                 results.append(result)
         return results
 
@@ -1589,6 +1782,17 @@ class StatisticalReconciler:
                 previous_label = periods[index]
                 current_label = periods[index + 1]
                 change = series.compare(previous_label, current_label)
+                used_months = set(change.months_used)
+                source_cells = [
+                    (
+                        f"{cell.source}!{cell.total_address}"
+                        if cell.total_address
+                        else cell.source
+                    )
+                    for cell in series.cells
+                    if cell.period in {previous_label, current_label}
+                    and cell.month in used_months
+                ]
                 result = compare_periods(
                     current_label=current_label,
                     previous_label=previous_label,
@@ -1598,7 +1802,7 @@ class StatisticalReconciler:
                     months_missing=change.months_missing,
                     incomplete_excluded=change.incomplete_excluded,
                     metric=series.metric,
-                    source="؛ ".join(change.months_used),
+                    source="؛ ".join(source_cells) or "؛ ".join(change.months_used),
                 )
                 if change.total_a is None or change.total_b is None:
                     result.explanation = change.note
@@ -1626,14 +1830,20 @@ def _row_from_source(source: str) -> int:
     return int(match.group(2)) if match else 0
 
 
+def _contains_word(text: str, word: str) -> bool:
+    if word.isascii():
+        return re.search(rf"\b{re.escape(word)}\b", text) is not None
+    return word in text
+
+
 def _is_ratio_field(field: SemanticField) -> bool:
     unit = _normalized(field.unit)
     header = _normalized(field.header)
-    if unit in {"%", "percent", "percentage", "درصد"}:
+    if unit in {"%", "٪", "percent", "percentage", "درصد"}:
         return True
-    return any(word in header for word in _RATIO_WORDS)
+    return any(_contains_word(header, word) for word in _RATIO_WORDS)
 
 
 def _is_weight_field(field: SemanticField) -> bool:
     header = _normalized(field.header)
-    return any(word in header for word in _WEIGHT_WORDS)
+    return any(_contains_word(header, word) for word in _WEIGHT_WORDS)
