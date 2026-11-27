@@ -923,7 +923,7 @@ python -c "import openpyxl"                    -> ModuleNotFoundError
 python -c "import PySide6"                     -> ModuleNotFoundError
 python -m compileall -q src tests              -> exit 0
 python - <<AST scan>>                          -> openpyxl, psutil, PySide6, docx, pptx, pdfplumber, PIL, pytesseract
-python - <<zip diff>>                          -> 130 entries; 6 files differ; src/ identical
+python - <<zip diff>>                          -> 130 entries; 7 files differ (including .gitignore); src/ identical
 python - <<is_total_label probe>>              -> جمعیت / کلاسه پرونده / تکلیف / کلانتری => True
 python - <<role keyword probe>>                -> سال / ماه / روز / سال تصادف / ماه وقوع / شهرستان => UNKNOWN
 ```
