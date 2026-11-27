@@ -79,7 +79,7 @@ The three failures were exactly T2, T3, and T9. Dependency installation and open
 - The user's actual Windows environment `F:\Local-Office-AI` and its existing `venv`.
 - Ollama/Qwen, LibreHardwareMonitor, PySide6 desktop runtime and Tesseract in the user's installation.
 - The three original administrative files and real-file acceptance. They are intentionally absent from GitHub and must remain local/read-only.
-- The private source workbook used by `requires_sample` tests. The 38 marked tests are excluded from the CI gate, not silently treated as passed.
+- The private source workbook used by `requires_sample` tests. The 36 marked tests are excluded from the CI gate, not silently treated as passed.
 
 ## Preparation CI update
 
@@ -270,8 +270,13 @@ merge of Prompt 01B). No cross-source aggregation was added.
   `QualityFinding`, `QualityReport` and `DataQualityAnalyzer`. The eight required
   checks are `missing_values`, `invalid_numeric`, `unexpected_text`,
   `negative_values`, `duplicate_identifiers`, `inconsistent_units`,
-  `conflicting_periods` and `suspicious_values`. Every check has an explicit
-  status, location, count and samples; values are never repaired.
+  `conflicting_periods` and `suspicious_values`. Quality runs on every analyzable
+  block, and each finding keeps its sheet, block address, cell, column, count and
+  samples; values are never repaired. `conflicting_periods` compares scalar
+  sources with each other and with column-header/row-label periods.
+  `duplicate_identifiers` treats record/case numbers as strict. A measure-word
+  header with all-text values is reported as `unexpected_text`, while
+  `DESCRIPTIVE_HEADER_WORDS` keeps a header such as «توضیحات مبلغ» descriptive.
 - `sheet_analyzer.py`: `assign_statistical_roles` now uses the shared identifier
   evidence and checks temporal keys before identifiers. Formula ratios no longer
   override identifier or temporal roles.
@@ -280,22 +285,28 @@ merge of Prompt 01B). No cross-source aggregation was added.
 - `app/workflow.py`: semantics and quality are built after table detection and
   before statistics.
 - `generic_report.py` / `report_writer.py`: audit-only «نقش‌های معنایی» and
-  «کیفیت داده (تفصیلی)» sheets; the clean «اعتبارسنجی داده» sheet gains a compact
-  quality summary and lists non-`PASS` findings only.
-- `tests/test_semantic_quality.py` (new, 13 tests) covers the eight required
-  cases with real openpyxl workbooks, plus role coverage, row roles, evidence and
-  serialization. `tests/test_output_quality.py` guards the audit-only sheets.
+  «کیفیت داده (تفصیلی)» sheets (the latter includes a block column); the clean
+  «اعتبارسنجی داده» sheet gains a compact quality summary and lists non-`PASS`
+  findings only.
+- `tests/test_semantic_quality.py` (new, 20 tests) covers the eight required
+  cases with real openpyxl workbooks, plus administrative/vehicle/region/record
+  identifiers, English and Arabic-Indic digits, all-text measure columns,
+  cross-source period conflicts, quality on every block, role coverage, row roles,
+  evidence and serialization. `tests/test_output_quality.py` guards the
+  audit-only sheets.
 
 ### Test evidence [SBX]
 
-Sandbox: Linux, CPython 3.13.15. Not Windows-target validation.
+Sandbox: Linux, CPython 3.13.15. Not Windows-target validation. Runtime,
+document and development dependencies were installed from the repository
+requirements files before this run.
 
 ```text
 python -m pytest tests/test_semantic_quality.py -o addopts="" -q
--> 13 passed in 0.58s (exit 0)
+-> 20 passed in 1.10s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 209 passed, 6 skipped, 36 deselected, 1 xfailed in 23.12s (exit 0)
+-> 220 passed, 2 skipped, 36 deselected, 1 xfailed in 24.97s (exit 0)
 ```
 
 The single `xfailed` outcome is still T9, the open output-suffix defect. The 36

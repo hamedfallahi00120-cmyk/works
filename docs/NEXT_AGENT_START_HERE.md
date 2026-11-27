@@ -31,10 +31,10 @@ Recorded sandbox evidence:
 
 ```text
 python -m pytest tests/test_semantic_quality.py -o addopts="" -q
--> 13 passed in 0.58s
+-> 20 passed in 1.10s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 209 passed, 6 skipped, 36 deselected, 1 xfailed in 23.12s
+-> 220 passed, 2 skipped, 36 deselected, 1 xfailed in 24.97s
 ```
 
 The `xfailed` result is T9. The 36 deselected tests are `requires_sample`; their private

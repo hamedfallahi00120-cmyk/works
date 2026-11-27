@@ -119,23 +119,28 @@ truncated.
   `QualityReport` and `DataQualityAnalyzer`. The eight required checks are
   `missing_values`, `invalid_numeric`, `unexpected_text`, `negative_values`,
   `duplicate_identifiers`, `inconsistent_units`, `conflicting_periods` and
-  `suspicious_values`. Findings keep the sheet, cell, column, count and samples; values
-  are never repaired. Severity is requirement-based: complete measure `PASS`, some blanks
-  `WARNING`, conflicting period or broken unique identifier `FAIL`.
+  `suspicious_values`. Quality runs on every analyzable block; findings keep the sheet,
+  block address, cell, column, count and samples, and values are never repaired.
+  Severity is requirement-based: complete measure `PASS`, some blanks `WARNING`,
+  conflicting period or broken unique identifier `FAIL`. `conflicting_periods` compares
+  scalar sources with each other and with column-header/row-label periods. A measure-word
+  header with all-text values is `unexpected_text`; `DESCRIPTIVE_HEADER_WORDS` keeps
+  «توضیحات مبلغ» descriptive.
 - `sheet_analyzer.py` — `assign_statistical_roles` uses the shared identifier evidence and
   checks temporal keys before identifiers; formula ratios never override a key role.
 - `core/models.py` — `AnalysisResult.semantics` and `AnalysisResult.quality`, serialized
   into the processed JSON.
 - `app/workflow.py` — semantics and quality are built after table detection and before
   statistics.
-- The audit profile writes «نقش‌های معنایی» and «کیفیت داده (تفصیلی)»; the clean profile
-  never does. The clean «اعتبارسنجی داده» sheet shows a compact quality summary and only
-  non-`PASS` findings.
-- `tests/test_semantic_quality.py` (13 tests) covers numeric identifiers versus measures,
+- The audit profile writes «نقش‌های معنایی» and «کیفیت داده (تفصیلی)» (with a block
+  column); the clean profile never does. The clean «اعتبارسنجی داده» sheet shows a compact
+  quality summary and only non-`PASS` findings.
+- `tests/test_semantic_quality.py` (20 tests) covers numeric identifiers versus measures,
   date/year/month keys versus measures, missing values, invalid numeric content,
-  unexpected text, negative values, unit inconsistencies, conflicting periods and
-  duplicate identifiers with real openpyxl workbooks. `tests/test_output_quality.py`
-  guards the two audit-only sheets.
+  unexpected text, negative values, unit inconsistencies, conflicting periods,
+  duplicate identifiers and record numbers, administrative/vehicle/region codes, English
+  and Arabic-Indic digits, all-text measure columns and per-block quality with real
+  openpyxl workbooks. `tests/test_output_quality.py` guards the two audit-only sheets.
 
 ### Instructions for the next AI agent
 
@@ -163,7 +168,7 @@ truncated.
    the owner's Windows environment.
 
 Any reported test count must come from the actual command run in the current environment.
-The 38 tests marked `requires_sample` depend on a non-public workbook and are excluded
+The 36 tests marked `requires_sample` depend on a non-public workbook and are excluded
 from the CI gate with `-m "not requires_sample"`; they are not counted as successful.
 
 ## Layout

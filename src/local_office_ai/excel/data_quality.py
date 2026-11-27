@@ -32,7 +32,9 @@ from local_office_ai.excel.normalization import (
 )
 from local_office_ai.excel.period_detection import (
     KIND_MONTH,
+    KIND_MONTH_YEAR,
     KIND_YEAR,
+    SCALAR_SOURCES,
     SOURCE_BLOCK_TITLE,
     SOURCE_COLUMN_HEADER,
     SOURCE_FILENAME,
@@ -41,7 +43,9 @@ from local_office_ai.excel.period_detection import (
     PeriodSource,
     cell_text,
     detect_periods,
+    months_per_source,
     scalar_conflicts,
+    years_per_source,
 )
 from local_office_ai.excel.row_classification import (
     ROW_DATA,
@@ -57,11 +61,13 @@ from local_office_ai.excel.semantic_classification import (
 from local_office_ai.excel.semantic_vocabulary import (
     allows_negative,
     currency_words_in,
+    has_descriptive_word,
     has_measure_word,
     requires_unique_identifier,
     scale_words_in,
 )
 from local_office_ai.excel.sheet_analyzer import SheetGrid, summary_label_role
+from local_office_ai.excel.table_detector import is_report_sheet
 
 
 class QualityStatus(str, Enum):
@@ -101,6 +107,7 @@ class QualityFinding:
     message: str
     scope: str = ""
     sheet: str = ""
+    block: str = ""
     address: str = ""
     column: str = ""
     count: int = 0
@@ -120,6 +127,7 @@ class QualityFinding:
             "message": self.message,
             "scope": self.scope,
             "sheet": self.sheet,
+            "block": self.block,
             "address": self.address,
             "column": self.column,
             "count": self.count,
@@ -183,7 +191,7 @@ class QualityReport:
 
 
 class DataQualityAnalyzer:
-    """Run the required quality checks over the primary extracted table."""
+    """Run the required quality checks over every analyzable extracted block."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -195,21 +203,49 @@ class DataQualityAnalyzer:
         grids: dict[str, SheetGrid] | None = None,
     ) -> QualityReport:
         grids = grids or {}
-        table = analysis.primary_table
-        if table is None or table.sheet not in grids:
-            return QualityReport(
-                [
-                    QualityFinding(
-                        code="primary-table",
-                        title="جدول اصلی",
-                        status=QualityStatus.FAIL,
-                        message="جدول داده‌ای برای اعتبارسنجی معنایی و کیفیت پیدا نشد.",
-                        scope=Path(analysis.meta.path).name,
-                    )
-                ]
-            )
+        tables = self._tables(analysis)
+        findings: list[QualityFinding] = []
+        for table in tables:
+            grid = grids.get(table.sheet)
+            if grid is None:
+                continue
+            findings.extend(self._analyze_table(analysis, grid, table))
+        if findings:
+            return QualityReport(findings)
+        return QualityReport(
+            [
+                QualityFinding(
+                    code="primary-table",
+                    title="جدول اصلی",
+                    status=QualityStatus.FAIL,
+                    message="جدول داده‌ای برای اعتبارسنجی معنایی و کیفیت پیدا نشد.",
+                    scope=Path(analysis.meta.path).name,
+                )
+            ]
+        )
 
-        grid = grids[table.sheet]
+    @staticmethod
+    def _tables(analysis: AnalysisResult) -> list[Any]:
+        """Every valid block that later receives statistics, without duplicates."""
+        result: list[Any] = []
+        seen: set[int] = set()
+        for table in getattr(analysis, "tables", []) or []:
+            if is_report_sheet(table.sheet):
+                continue
+            if table.row_count < 1 or len(table.columns) < 1:
+                continue
+            if id(table) in seen:
+                continue
+            seen.add(id(table))
+            result.append(table)
+        return result
+
+    def _analyze_table(
+        self,
+        analysis: AnalysisResult,
+        grid: SheetGrid,
+        table: Any,
+    ) -> list[QualityFinding]:
         profiles = {column.index: column for column in table.columns}
         fields = self._fields(analysis, table)
         rows = self._data_rows(grid, table)
@@ -236,7 +272,12 @@ class DataQualityAnalyzer:
             applicable.add("_period_conflicts")
 
         findings.extend(self._ensure_pass(findings, applicable, table))
-        return QualityReport(findings)
+        for finding in findings:
+            if not finding.block:
+                finding.block = table.address
+            if not finding.sheet:
+                finding.sheet = table.sheet
+        return findings
 
     # ------------------------------------------------------------------ #
     def _fields(self, analysis: AnalysisResult, table: Any) -> list[SemanticField]:
@@ -280,6 +321,12 @@ class DataQualityAnalyzer:
         """True when a column is a measure, even if invalid text diluted its role."""
         if field.role in MEASURE_ROLES:
             return True
+        if field.role in {SemanticRole.IDENTIFIER, SemanticRole.TEMPORAL_KEY}:
+            return False
+        # A measure-word header still promises numbers when every value is bad
+        # text; a header such as «توضیحات مبلغ» stays descriptive.
+        if has_measure_word(field.header) and not has_descriptive_word(field.header):
+            return True
         if profile is None:
             return False
         if profile.data_type in {ValueKind.NUMBER, ValueKind.ERROR}:
@@ -319,7 +366,7 @@ class DataQualityAnalyzer:
                         f"ستون «{field.header or field.letter}» {len(missing)} مقدار از "
                         f"{len(rows)} ردیف داده را ندارد ({ratio:.0%})."
                     ),
-                    scope=f"{table.sheet}!{field.letter}",
+                    scope=f"{table.sheet}!{table.address}!{field.letter}",
                     sheet=table.sheet,
                     address=missing[0],
                     column=field.letter,
@@ -381,7 +428,7 @@ class DataQualityAnalyzer:
                             f"ستون «{field.header or field.letter}» {len(invalid)} مقدار عددی "
                             "نامعتبر یا خطای فرمول دارد."
                         ),
-                        scope=f"{table.sheet}!{field.letter}",
+                        scope=f"{table.sheet}!{table.address}!{field.letter}",
                         sheet=table.sheet,
                         address=invalid[0],
                         column=field.letter,
@@ -399,7 +446,7 @@ class DataQualityAnalyzer:
                             f"ستون «{field.header or field.letter}» {len(unexpected)} مقدار متنی "
                             "بدون رقم دارد؛ مقدار جایگزین یا اصلاح نشد."
                         ),
-                        scope=f"{table.sheet}!{field.letter}",
+                        scope=f"{table.sheet}!{table.address}!{field.letter}",
                         sheet=table.sheet,
                         address=unexpected[0],
                         column=field.letter,
@@ -449,7 +496,7 @@ class DataQualityAnalyzer:
                             f"ستون «{field.header or field.letter}» {len(negatives)} مقدار منفی دارد "
                             "که با معنای اندازه‌گیری سازگار نیست؛ مقدار حفظ شد."
                         ),
-                        scope=f"{table.sheet}!{field.letter}",
+                        scope=f"{table.sheet}!{table.address}!{field.letter}",
                         sheet=table.sheet,
                         address=negatives[0],
                         column=field.letter,
@@ -504,7 +551,7 @@ class DataQualityAnalyzer:
                         f"ستون «{field.header or field.letter}» {len(duplicates)} مقدار تکراری دارد"
                         + (" و یکتایی آن الزامی است." if strict else "؛ یکتایی آن تأیید نشد.")
                     ),
-                    scope=f"{table.sheet}!{field.letter}",
+                    scope=f"{table.sheet}!{table.address}!{field.letter}",
                     sheet=table.sheet,
                     address=next(iter(duplicates.values()))[0],
                     column=field.letter,
@@ -573,7 +620,7 @@ class DataQualityAnalyzer:
                             f"ستون «{field.header or field.letter}» واحد یکدست ندارد؛ "
                             "مقدارها تبدیل یا اصلاح نشدند."
                         ),
-                        scope=f"{table.sheet}!{field.letter}",
+                        scope=f"{table.sheet}!{table.address}!{field.letter}",
                         sheet=table.sheet,
                         address=addresses[0] if addresses else "",
                         column=field.letter,
@@ -624,7 +671,7 @@ class DataQualityAnalyzer:
                             f"ستون «{field.header or field.letter}» در همه {len(numbers)} مقدار "
                             "ثابت است؛ واریانس صفر است."
                         ),
-                        scope=f"{table.sheet}!{field.letter}",
+                        scope=f"{table.sheet}!{table.address}!{field.letter}",
                         sheet=table.sheet,
                         address=values[0][0],
                         column=field.letter,
@@ -646,7 +693,7 @@ class DataQualityAnalyzer:
                             f"ستون «{field.header or field.letter}» {len(flagged)} مقدار خارج از "
                             "بازه معمول دارد؛ مقدار حذف نشد و فقط علامت‌گذاری شد."
                         ),
-                        scope=f"{table.sheet}!{field.letter}",
+                        scope=f"{table.sheet}!{table.address}!{field.letter}",
                         sheet=table.sheet,
                         address=flagged[0],
                         column=field.letter,
@@ -680,6 +727,7 @@ class DataQualityAnalyzer:
         detection = detect_periods(sources)
         conflicts = scalar_conflicts(detection, dimension=KIND_YEAR)
         conflicts.extend(scalar_conflicts(detection, dimension=KIND_MONTH))
+        conflicts.extend(self._cross_source_period_conflicts(detection))
 
         intelligence = getattr(analysis, "intelligence", None)
         if intelligence is not None:
@@ -718,6 +766,56 @@ class DataQualityAnalyzer:
             ],
             True,
         )
+
+    @staticmethod
+    def _cross_source_period_conflicts(detection: Any) -> list[dict[str, Any]]:
+        """Compare a scalar period label with column-header/row-label periods.
+
+        Two column years (1403 and 1404) are a legitimate comparison, not a
+        conflict.  A scalar source that names a year or month absent from every
+        column header and row label is the suspicious case.
+        """
+        years: set[str] = set()
+        months: set[str] = set()
+        non_scalar_sources: set[str] = set()
+        for evidence in detection.evidence:
+            if evidence.source in SCALAR_SOURCES:
+                continue
+            non_scalar_sources.add(evidence.source)
+            if evidence.kind == KIND_YEAR:
+                years.add(evidence.token)
+            elif evidence.kind == KIND_MONTH:
+                months.add(evidence.token)
+            elif evidence.kind == KIND_MONTH_YEAR:
+                month, _, year = evidence.token.rpartition(" ")
+                if year:
+                    years.add(year)
+                if month:
+                    months.add(month)
+        if not years and not months:
+            return []
+
+        conflicts: list[dict[str, Any]] = []
+        for dimension, detected, grouped in (
+            (KIND_YEAR, years, years_per_source(detection)),
+            (KIND_MONTH, months, months_per_source(detection)),
+        ):
+            if not detected:
+                continue
+            for source, values in grouped.items():
+                if not values or set(values) & detected:
+                    continue
+                conflicts.append(
+                    {
+                        "dimension": dimension,
+                        "sources": [source, *sorted(non_scalar_sources)],
+                        "values": {
+                            source: list(values),
+                            "column_header/row_label": sorted(detected),
+                        },
+                    }
+                )
+        return conflicts
 
     @staticmethod
     def _period_sources(

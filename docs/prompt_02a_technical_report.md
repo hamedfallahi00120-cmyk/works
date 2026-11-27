@@ -69,10 +69,11 @@ overrides an identifier or temporal key.
 
 ## Data-quality checks
 
-`excel/data_quality.py` runs on the primary table and returns a `QualityReport`.
-Every finding has `PASS`, `WARNING` or `FAIL`, a Persian label, a scope, a sheet,
-a cell address, a column, a count, samples and evidence. The eight required
-checks always appear, even when they pass.
+`excel/data_quality.py` runs on every analyzable block and returns one
+`QualityReport`. Every finding has `PASS`, `WARNING` or `FAIL`, a Persian label,
+a scope, a sheet, a block address, a cell address, a column, a count, samples
+and evidence. The eight required checks always appear for each block, even when
+they pass, so a secondary table is never left without a quality status.
 
 | Code | What is recorded | Default severity |
 | :--- | :--- | :--- |
@@ -82,19 +83,25 @@ checks always appear, even when they pass.
 | `negative_values` | Negative values in measures whose header does not allow them | `WARNING` |
 | `duplicate_identifiers` | Repeated values in a column that should be unique | `FAIL` for unique identifiers; `WARNING` otherwise |
 | `inconsistent_units` | Mixed scale words, mixed currencies, or header/cell mismatch | `WARNING` |
-| `conflicting_periods` | Scalar period sources that disagree | `FAIL` |
+| `conflicting_periods` | Scalar sources that disagree, or a scalar year/month absent from every column header and row label | `FAIL` |
 | `suspicious_values` | IQR outliers, extreme magnitudes, or a constant measure | `WARNING` |
 
 `allows_negative()` exempts balances, differences, variances, profit/loss and
 similar headers. `requires_unique_identifier()` marks national IDs, personnel
-IDs, serials, barcodes and row IDs as strict; a repeated region or category code
-is not reported as a broken unique identifier unless the column is almost
-entirely unique.
+IDs, record/case numbers, serials, barcodes and row IDs as strict; a repeated
+region or category code is not reported as a broken unique identifier unless the
+column is almost entirely unique.
+
+A measure-word header still promises numbers when every value is bad text, so a
+wholly text `مبلغ` column is reported as `unexpected_text`. A header such as
+`توضیحات مبلغ` is descriptive and is excluded by `DESCRIPTIVE_HEADER_WORDS`.
 
 The analyzer never edits the workbook. A cell with `#DIV/0!`, `12abc` or
 `نامشخص` stays exactly as it was; only the finding is recorded. Conflicting
 periods reuse `period_detection` (sheet name, filename, block title, column
-headers and row labels) and never pick a winner.
+headers and row labels) and never pick a winner. Two column years (`1403` and
+`1404`) are a legitimate comparison, not a conflict; a scalar label naming a
+year or month absent from every header and row label is the reported case.
 
 ## Integration
 
@@ -102,45 +109,48 @@ headers and row labels) and never pick a winner.
   fields; both are serialized into the processed JSON through `to_dict()`.
 - `app/workflow.py` builds semantics and quality immediately after table
   detection and before statistics, so later stages already see the roles and
-  findings.
+  findings. Quality covers every analyzable block, not only the primary table.
 - The audit profile writes two new sheets:
   - «نقش‌های معنایی» — every field's role, confidence, unit, evidence and row
     roles;
-  - «کیفیت داده (تفصیلی)» — every finding with its status, location and samples.
+  - «کیفیت داده (تفصیلی)» — every finding with its status, block, location and
+    samples.
 - The clean profile never writes those sheets. Instead, the existing
   «اعتبارسنجی داده» sheet gains a compact quality summary and lists only
   non-`PASS` findings.
 
 ## Tests
 
-`tests/test_semantic_quality.py` (13 tests) covers the eight required cases with
+`tests/test_semantic_quality.py` (20 tests) covers the eight required cases with
 real `.xlsx` files created by openpyxl:
 
 1. numeric identifiers versus numeric measures, including a fixed-width code
-   without an identifier keyword and a ten-digit monetary amount that stays a
-   measure;
+   without an identifier keyword, a ten-digit monetary amount that stays a
+   measure, administrative/vehicle/region codes, a record number, an English
+   postal code and Arabic-Indic digits;
 2. date, year and month fields versus numeric measures;
 3. missing values with their exact cells;
 4. invalid numeric content, including an Excel error, a mixed value and pure
    text, plus a re-open check that the source cells were not repaired;
 5. negative values, with an exemption for a balance column;
 6. mixed scale words (`میلیون` versus `میلیارد`);
-7. conflicting period labels in the filename and sheet name;
-8. duplicate national identifiers.
+7. conflicting period labels in the filename and sheet name, and a scalar label
+   that disagrees with a column-header period;
+8. duplicate national identifiers and duplicate record numbers.
 
 Additional tests cover the required role vocabulary, subtotal/grand-total row
-roles, identifier evidence, the presence of every required check status, and
-JSON serialization. `tests/test_output_quality.py` now asserts the two new
-audit sheets are present in audit output and absent from clean output.
+roles, identifier evidence, all-text measure columns, quality on every
+analyzable block, the presence of every required check status, and JSON
+serialization. `tests/test_output_quality.py` now asserts the two new audit
+sheets are present in audit output and absent from clean output.
 
 ## Known limits
 
-- Quality checks run on the primary table only. Secondary blocks are classified
-  but not quality-audited, to avoid broad cross-source aggregation in this
-  stage.
 - A row with a label and no numeric value at all is still treated as a group
   heading by the shared row classifier, so a wholly empty measure row is not
   counted as missing. Partial missing values inside a data row are counted.
+- Quality findings are recorded per block. They are never aggregated or summed
+  across blocks in this stage.
 - Unit detection recognises scale words and currency words; it does not convert
   between units.
 - `suspicious_values` uses a float IQR only for anomaly flags. Authoritative

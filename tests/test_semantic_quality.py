@@ -98,6 +98,51 @@ def test_identifier_evidence_is_recorded(settings, make_workbook):
     field = _fields(analysis, "داده")["کد پستی"]
     assert field.evidence, "شاهد طبقه‌بندی شناسه ثبت نشد"
     assert any("طول ثابت" in item or "شناسه" in item for item in field.evidence)
+    assert any("برگه" in item for item in field.evidence)
+
+
+def test_administrative_vehicle_region_and_record_codes_stay_identifiers(
+    settings, make_workbook
+):
+    path = make_workbook(
+        "administrative_codes.xlsx",
+        {
+            "داده": [
+                ["کد اداری", "کد خودرو", "کد منطقه", "شماره پرونده", "مبلغ"],
+                [1001, 2184, 31, 9001, 1000],
+                [1002, 2079, 32, 9002, 2000],
+                [1003, 2047, 33, 9003, 3000],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    fields = _fields(analysis, "داده")
+    identifiers = ("کد اداری", "کد خودرو", "کد منطقه", "شماره پرونده")
+    for header in identifiers:
+        assert fields[header].role is SemanticRole.IDENTIFIER, header
+    assert fields["مبلغ"].role is SemanticRole.MEASURE
+
+    measures = {column.header for column in analysis.intelligence.sheet("داده").measures}
+    assert "مبلغ" in measures
+    assert not set(identifiers) & measures
+
+
+def test_english_and_arabic_digit_identifiers_are_protected(settings, make_workbook):
+    path = make_workbook(
+        "english_codes.xlsx",
+        {
+            "داده": [
+                ["postal code", "amount"],
+                ["١٢٣٤٥٦٧٨٩٠", 1000],
+                ["١٢٣٤٥٦٧٨٩١", 2000],
+                ["١٢٣٤٥٦٧٨٩٢", 3000],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    fields = _fields(analysis, "داده")
+    assert fields["postal code"].role is SemanticRole.IDENTIFIER
+    assert fields["amount"].role is SemanticRole.MEASURE
 
 
 # --------------------------------------------------------------------------- #
@@ -193,6 +238,29 @@ def test_invalid_numeric_content_is_reported_not_repaired(settings, make_workboo
     workbook.close()
 
 
+def test_all_text_measure_column_is_reported_as_unexpected_text(
+    settings, make_workbook
+):
+    path = make_workbook(
+        "all_text_measure.xlsx",
+        {
+            "داده": [
+                ["شرح", "مبلغ", "تعداد", "توضیحات مبلغ"],
+                ["الف", "نامشخص", 5, "پرداخت نشد"],
+                ["ب", "نامعلوم", 7, "در انتظار"],
+                ["ج", "---", 9, "بدون سند"],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    unexpected = _findings(analysis, "unexpected_text")
+    assert unexpected, "متن غیرمنتظره در ستون مبلغ ثبت نشد"
+    assert unexpected[0].column == "B"
+    assert unexpected[0].count == 3
+    # «توضیحات مبلغ» is descriptive, not a broken numeric column.
+    assert all(finding.column != "D" for finding in unexpected)
+
+
 # --------------------------------------------------------------------------- #
 # 5. Negative values
 # --------------------------------------------------------------------------- #
@@ -211,9 +279,9 @@ def test_negative_values_are_flagged_only_where_they_are_invalid(settings, make_
     analysis = _analyze(settings, path)
     findings = _findings(analysis, "negative_values")
     assert findings, "مقدار منفی نامعتبر ثبت نشد"
-    scopes = {finding.scope for finding in findings}
-    assert "داده!B" in scopes
-    assert "داده!C" not in scopes  # «مانده» may legitimately be negative
+    assert any(finding.column == "B" for finding in findings)
+    assert all(finding.column != "C" for finding in findings)  # «مانده» may legitimately be negative
+    assert all(finding.block for finding in findings)
 
 
 # --------------------------------------------------------------------------- #
@@ -263,6 +331,26 @@ def test_conflicting_period_labels_fail_the_check(settings, make_workbook):
     assert finding.evidence
 
 
+def test_scalar_label_conflicting_with_a_column_period_fails(settings, make_workbook):
+    path = make_workbook(
+        "گزارش 1403.xlsx",
+        {
+            "داده": [
+                ["شرح", "فروردین 1404"],
+                ["الف", 1000],
+                ["ب", 2000],
+                ["ج", 3000],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    findings = _findings(analysis, "conflicting_periods")
+    assert findings, "تعارض دوره فایل با سرستون ثبت نشد"
+    finding = findings[0]
+    assert finding.status is QualityStatus.FAIL
+    assert any("column_header" in item for item in finding.evidence)
+
+
 # --------------------------------------------------------------------------- #
 # 8. Duplicate identifiers
 # --------------------------------------------------------------------------- #
@@ -286,6 +374,60 @@ def test_duplicate_unique_identifiers_fail_the_check(settings, make_workbook):
     assert finding.status is QualityStatus.FAIL
     assert finding.count == 1
     assert any("1234567890" in sample for sample in finding.samples)
+
+
+def test_duplicate_record_numbers_fail_the_check(settings, make_workbook):
+    path = make_workbook(
+        "record_duplicates.xlsx",
+        {
+            "داده": [
+                ["شماره پرونده", "مبلغ"],
+                [9001, 1000],
+                [9001, 2000],
+                [9002, 3000],
+                [9003, 4000],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    findings = _findings(analysis, "duplicate_identifiers")
+    assert findings, "شماره پرونده تکراری ثبت نشد"
+    finding = findings[0]
+    assert finding.status is QualityStatus.FAIL
+    assert finding.count == 1
+    assert any("9001" in sample for sample in finding.samples)
+
+
+# --------------------------------------------------------------------------- #
+# Quality runs on every analyzable block, not only the primary table
+# --------------------------------------------------------------------------- #
+def test_quality_runs_on_every_analyzable_block(settings, make_workbook):
+    path = make_workbook(
+        "two_blocks_quality.xlsx",
+        {
+            "داده": [
+                ["شرح", "مبلغ"],
+                ["الف", 1000],
+                ["ب", 2000],
+                ["ج", 3000],
+                [],
+                ["شرح", "تعداد"],
+                ["الف", 5],
+                ["ب", 6],
+                ["ج", 7],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    blocks = {finding.block for finding in analysis.quality.findings if finding.block}
+    assert len(blocks) >= 2, blocks
+    for block in blocks:
+        codes = {
+            finding.code
+            for finding in analysis.quality.findings
+            if finding.block == block
+        }
+        assert REQUIRED_CHECK_CODES <= codes, (block, codes)
 
 
 # --------------------------------------------------------------------------- #
@@ -323,6 +465,26 @@ def test_required_semantic_roles_are_supported():
     }
     assert required <= {role.value for role in SemanticRole}
     assert required <= {role.value for role in SEMANTIC_ROLE_FA}
+
+
+def test_category_group_and_descriptive_roles_are_produced(settings, make_workbook):
+    rows = [["شرح", "گروه", "توضیحات", "مبلغ"]]
+    for index in range(30):
+        rows.append(
+            [
+                ["الف", "ب", "ج", "د"][index % 4],
+                ["گروه ۱", "گروه ۲"][index % 2],
+                f"توضیح کامل و یکتای ردیف شماره {index} درباره پرونده اداری",
+                (index + 1) * 1000,
+            ]
+        )
+    path = make_workbook("roles.xlsx", {"داده": rows})
+    analysis = _analyze(settings, path)
+    fields = _fields(analysis, "داده")
+    assert fields["شرح"].role is SemanticRole.CATEGORY
+    assert fields["گروه"].role is SemanticRole.GROUP
+    assert fields["توضیحات"].role is SemanticRole.DESCRIPTIVE
+    assert fields["مبلغ"].role is SemanticRole.MEASURE
 
 
 def test_subtotal_and_grand_total_rows_get_semantic_roles(settings, make_workbook):

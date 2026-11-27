@@ -182,6 +182,31 @@ NEGATIVE_ALLOWED_WORDS = (
     "margin",
 )
 
+# Headers that describe text even when they mention a measure word, e.g.
+# «توضیحات مبلغ».  They must not turn a descriptive column into a numeric one.
+DESCRIPTIVE_HEADER_WORDS = (
+    "توضیح",
+    "توضیحات",
+    "شرح",
+    "ملاحظات",
+    "یادداشت",
+    "آدرس",
+    "نام",
+    "عنوان",
+    "علت",
+    "اقدام",
+    "پیوست",
+    "description",
+    "comment",
+    "note",
+    "notes",
+    "address",
+    "name",
+    "title",
+    "reason",
+    "action",
+)
+
 # Identifier columns where uniqueness is an explicit requirement.
 UNIQUE_IDENTIFIER_WORDS = (
     "شناسه ملی",
@@ -193,12 +218,22 @@ UNIQUE_IDENTIFIER_WORDS = (
     "بارکد",
     "ردیف",
     "یکتا",
+    "شماره پرونده",
+    "شناسه پرونده",
+    "شماره سند",
+    "شماره نامه",
+    "شماره رکورد",
+    "کد رهگیری",
     "unique",
     "national id",
     "personnel id",
     "serial",
     "barcode",
     "uuid",
+    "record id",
+    "record number",
+    "case number",
+    "tracking code",
 )
 
 SCALE_WORDS = (
@@ -295,6 +330,10 @@ def has_identifier_word(header: object, *, strong_only: bool = False) -> bool:
 
 def has_measure_word(header: object) -> bool:
     return has_word(header, MEASURE_WORDS)
+
+
+def has_descriptive_word(header: object) -> bool:
+    return has_word(header, DESCRIPTIVE_HEADER_WORDS)
 
 
 def allows_negative(header: object) -> bool:

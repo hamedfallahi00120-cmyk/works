@@ -354,6 +354,7 @@ class SemanticClassifier:
             evidence.append(f"دوره ستون: {profile.period}")
         if table.title:
             evidence.append(f"عنوان جدول/بلوک: {table.title}")
+        evidence.append(f"برگه: {table.sheet}")
 
         unit = unit_from_header(profile.header) or self._neighbour_unit(grid, table, profile)
         if unit:

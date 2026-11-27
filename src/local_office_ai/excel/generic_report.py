@@ -981,7 +981,7 @@ class GenericReportMixin:
         report = getattr(analysis, "quality", None)
         ws = wb.create_sheet("کیفیت داده (تفصیلی)")
         self._rtl(ws)
-        self._title(ws, "یافته‌های کیفیت داده با وضعیت PASS/WARNING/FAIL و محل دقیق", 9)
+        self._title(ws, "یافته‌های کیفیت داده با وضعیت PASS/WARNING/FAIL و محل دقیق", 10)
         row = 3
         if report is None:
             self._value_cell(ws, row, 1, "یافته کیفیت داده برای این فایل ثبت نشد.")
@@ -989,7 +989,7 @@ class GenericReportMixin:
             return
         counts = report.counts()
         self._value_cell(ws, row, 1, "وضعیت کلی")
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=10)
         self._value_cell(
             ws,
             row,
@@ -999,7 +999,8 @@ class GenericReportMixin:
         )
         row += 2
         self._header(ws, row, [
-            "وضعیت", "بررسی", "پیام", "دامنه", "برگه", "سلول", "ستون", "تعداد", "نمونه/شاهد",
+            "وضعیت", "بررسی", "پیام", "دامنه", "برگه", "بلوک", "سلول", "ستون",
+            "تعداد", "نمونه/شاهد",
         ])
         header_row = row
         row += 1
@@ -1014,6 +1015,7 @@ class GenericReportMixin:
                 finding.message,
                 finding.scope or "—",
                 finding.sheet or "—",
+                finding.block or "—",
                 finding.address or "—",
                 finding.column or "—",
                 finding.count,
@@ -1023,11 +1025,11 @@ class GenericReportMixin:
                 self._value_cell(ws, row, offset, value)
             self._fill(ws.cell(row, 1), colors.get(finding.status.value, GREY))
             row += 1
-        self._body(ws, header_row + 1, row - 1, 1, 9)
-        ws.auto_filter.ref = f"A{header_row}:I{max(row - 1, header_row + 1)}"
+        self._body(ws, header_row + 1, row - 1, 1, 10)
+        ws.auto_filter.ref = f"A{header_row}:J{max(row - 1, header_row + 1)}"
         self._widths(ws, {
-            "A": 12, "B": 30, "C": 56, "D": 24, "E": 16, "F": 10,
-            "G": 8, "H": 8, "I": 48,
+            "A": 12, "B": 30, "C": 56, "D": 30, "E": 16, "F": 12,
+            "G": 10, "H": 8, "I": 8, "J": 48,
         })
         ws.freeze_panes = f"A{header_row + 1}"
         self._print_setup(ws)
