@@ -1,0 +1,8 @@
+# Development and test dependencies. Not needed to run the application.
+# Install after the runtime and document readers:
+#   python -m pip install -r requirements.txt -r requirements-documents.txt -r requirements-dev.txt
+pytest>=8.0
+
+# PDF fixture generation for tests/test_multiformat_ingestion.py.
+# 4.x ships a pure-Python wheel, so no compiler is required on the Windows runner.
+reportlab>=4.4,<5

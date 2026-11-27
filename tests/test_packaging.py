@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from local_office_ai.core.settings import load_settings
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +30,7 @@ def test_v42_files_are_in_legacy_not_root():
     assert (ROOT / "legacy" / "Run_Ollama_Excel_Assistant_V4_2.bat").is_file()
 
 
+@pytest.mark.requires_sample
 def test_sample_workbook_lives_in_data_input():
     assert (ROOT / "data" / "input" / "Book2_AI_V4_2_Monitored.xlsx").is_file()
     assert not (ROOT / "Book2_AI_V4_2_Monitored.xlsx").exists()

@@ -62,8 +62,9 @@ Any agent working on this repository must:
 
 ## Commands
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -r requirements.txt -r requirements-documents.txt -r requirements-dev.txt
 python -m pytest tests -o addopts="" -q      # 216 tests collected (202 when PySide6 is unavailable)
+python -m pytest tests -o addopts="" -q -m "not requires_sample"   # CI gate: reference workbook is not shipped
 python run_engine.py --file <xlsx> --no-ai --yes
 python run_engine.py --file <xlsx> --request "مقایسه 1404 با 1403 و بیشترین ماه" --no-ai
 python run_engine.py --folder data/input --request "جمع شاخص‌ها را مقایسه کن" --no-ai

@@ -1,0 +1,73 @@
+name: Python CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-python:
+    name: Windows / Python 3.14
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-documents.txt
+            requirements-dev.txt
+
+      - name: Report interpreter
+        run: python --version
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Install document dependencies
+        run: python -m pip install -r requirements-documents.txt
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Record installed dependency versions
+        run: python -m pip freeze
+
+      - name: Verify openpyxl import
+        run: python -c "import openpyxl; print('openpyxl', openpyxl.__version__)"
+
+      - name: Run targeted tests
+        run: python -m pytest tests -o addopts="" -q -ra --junitxml=test-results/pytest.xml -m "not requires_sample"
+
+      - name: List tests that need the reference workbook
+        run: python -m pytest tests -o addopts="" --collect-only -q -m requires_sample
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytest-results
+          path: test-results/pytest.xml
+          if-no-files-found: warn
