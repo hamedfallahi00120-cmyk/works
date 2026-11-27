@@ -508,7 +508,7 @@ def _parse_named_month(text: str, source: str) -> NormalizedPeriod | None:
             )
 
     gregorian = _gregorian_months_in(text)
-    if gregorian:
+    if gregorian and calendar_name == CALENDAR_GREGORIAN:
         if len(gregorian) > 1:
             return _named_months_range(year, gregorian, CALENDAR_GREGORIAN, source)
         name, month = gregorian[0]
@@ -796,7 +796,10 @@ def parse_period(text: Any, *, source: str = "") -> NormalizedPeriod | None:
     # period.  Never fall back to the bare year.
     if re.search(r"سه\s*ماهه|شش\s*ماهه|نیمه|نیم\s*سال|فصل|quarter", cleaned, re.IGNORECASE):
         return None
-    if len(_months_in(cleaned)) > 1 or len(_gregorian_months_in(cleaned)) > 1:
+    if _months_in(cleaned) or _gregorian_months_in(cleaned):
+        # A month name that did not produce a period (for example a Jalali
+        # month with a Gregorian year, or a non-consecutive month set) must not
+        # fall back to a bare year.
         return None
 
     for parser in (_parse_numeric, _parse_embedded_numeric, _parse_embedded_year):

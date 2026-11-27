@@ -526,6 +526,8 @@ def test_period_parser_supports_formats_and_calendars():
     assert parse_period("شش ماهه 1403") is None
     assert parse_period("مرداد و مهر 1403") is None
     assert parse_period("quarter 2024") is None
+    assert parse_period("تیر 2024") is None
+    assert parse_period("July 1403") is None
     assert parse_periods([]) == []
     same = parse_periods(["تیر 1403", "1403/04", "تیرماه ۱۴۰۳"])
     assert len({item.key for item in same}) == 1
