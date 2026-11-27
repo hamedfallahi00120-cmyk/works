@@ -20,20 +20,45 @@ The repository is private. The preparation baseline is on
 `feature/prompt-01a-data-model-metadata` (created from the verified preparation
 branch). Never work directly on `main`.
 
-The work already present is **Phase-1a preparation only**: isolated sandbox evidence,
+The preparation baseline is **Phase-1a preparation only**: isolated sandbox evidence,
 four focused tests (T2/T3/T4/T9), the quality ledger, the Phase 0 audit, and the
-sanitized handover. It is **not** completion of the agreed Prompt 01A. No production
-source-code defect fixes have been made in this preparation.
+sanitized handover. Prompt 01A is built on top of that baseline on
+`feature/prompt-01a-data-model-metadata`; the preparation branch itself still holds
+no production source fixes.
 
-Three known defects remain deliberately unfixed:
-- T2: total-label substring false positives (G3/R3).
-- T3: temporal columns classified as numeric measures (G5/R4).
-- T9: output suffix is not validated (G11/R8).
+Prompt 01A is implemented on `feature/prompt-01a-data-model-metadata`:
+- T2 (G3/R3) is fixed: totals keywords match on word boundaries, so `کلانتری ۱۲`,
+  `تکلیف`, `جمعیت` and `کلاسه پرونده` are ordinary labels while `جمع کل` still totals.
+- T3 (G5/R4) is fixed: `سال`, `ماه` and `روز` columns whose content agrees
+  (integer years, months 1..12, days 1..31) become `DataRole.TEMPORAL_KEY`, never measures.
+- T9 (G11/R8) remains open and stays `xfail(strict=True)`: output suffix is not validated.
 
-T2, T3 and T9 are temporarily marked `xfail(strict=True)` so the preparation baseline
-can have a passing CI gate without pretending the defects are fixed. When a later stage
-actually fixes one, remove its xfail marker and require a normal pass. T4 is a normal
-passing regression guard; the audit found R5 was not reproducible.
+T2 and T3 no longer carry xfail markers; they must keep passing normally. Do not
+reintroduce substring totals matching or let temporal keys back into numeric measures.
+
+### Prompt 01A extraction model
+
+- `excel/period_detection.py` — period tokens from five evidence sources
+  (`column_header`, `sheet_name`, `block_title`, `row_label`, `filename`). Every token
+  keeps its evidence text, address, source and confidence; `status` is `detected`,
+  `not_detected` or `conflicting`. No period is invented when evidence is insufficient.
+  Scalar-source disagreements are reported, never resolved by preferring one source.
+- `excel/extraction_model.py` — `WorkbookModel → SheetModel → BlockModel → ColumnModel/
+  CellRecord/MergedRangeRecord`. It projects the existing detectors (it does not
+  re-detect): block boundaries, header rows, parent/sub/period headers, business and
+  semantic roles, merged ranges with anchor values, original cell values, formulas,
+  cell addresses, period evidence and confidences. Attached as
+  `AnalysisResult.extraction` and serialized into the processed JSON.
+- `SheetIntelligence` now also carries `filename_years`, `periods`, `period_evidence`,
+  `period_sources`, `period_status` and `period_confidence`; filename years take part in
+  `metadata_conflicts` (`filename_vs_sheet_name_year`, `filename_vs_title_year`).
+- `DataRole.GROUP` separates low-cardinality group columns (`گروه`, `دسته`, `نوع` ...)
+  from free text; `DATA_ROLE_FA` maps it to «گروه‌بندی».
+- The audit profile writes the new «مدل استخراج» sheet; the clean profile never does.
+
+Known limits: row-label period evidence is scanned for the first 500 data rows per sheet
+and cells are capped at 4000 per block (`cells_truncated` flags the cap). Block boundaries,
+headers and columns stay complete even when cells are truncated.
 
 ### Instructions for the next AI agent
 

@@ -60,6 +60,7 @@ DATA_ROLE_FA = {
     DataRole.TEMPORAL_KEY: "کلید زمانی",
     DataRole.NUMERIC_MEASURE: "متغیر اندازه‌گیری",
     DataRole.CATEGORICAL: "دسته‌بندی",
+    DataRole.GROUP: "گروه‌بندی",
     DataRole.TEXT: "متنی",
     DataRole.CALCULATED: "فیلد محاسباتی",
     DataRole.UNKNOWN: "نامشخص",
@@ -826,4 +827,102 @@ class GenericReportMixin:
             row += 1
 
         self._widths(ws, {"A": 28, "B": 30, "C": 20, "D": 20, "E": 20, "F": 20})
+        self._print_setup(ws)
+
+    # ------------------------------------------------------------------ #
+    def _extraction_model(self, wb, analysis: AnalysisResult) -> None:
+        """Audit-only view of the structured extraction model and its evidence."""
+        model = getattr(analysis, "extraction", None)
+        ws = wb.create_sheet("مدل استخراج")
+        self._rtl(ws)
+        self._title(ws, "مدل استخراج: مرز بلوک‌ها، سرستون‌ها، ادغام‌ها، سلول‌ها و شواهد دوره", 12)
+        row = 3
+        if model is None:
+            self._value_cell(ws, row, 1, "مدل استخراج برای این فایل ساخته نشد.")
+            self._print_setup(ws)
+            return
+        status_fa = {
+            "detected": "شناسایی شد",
+            "not_detected": "شناسایی نشد",
+            "conflicting": "شواهد متناقض",
+        }
+        summary = [
+            ("نام فایل", model.source_filename),
+            ("وضعیت دوره", status_fa.get(model.period_status, model.period_status)),
+            ("اطمینان دوره", f"{model.period_confidence:.0%}"),
+            ("دوره‌های شناسایی‌شده", "، ".join(item["token"] for item in model.periods) or "—"),
+            ("برگه‌ها / بلوک‌ها", f"{len(model.sheets)} / {sum(len(sheet.blocks) for sheet in model.sheets)}"),
+        ]
+        for label, value in summary:
+            self._value_cell(ws, row, 1, label)
+            ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=12)
+            self._value_cell(ws, row, 2, value)
+            row += 1
+
+        for sheet in model.sheets:
+            row += 1
+            self._section(
+                ws,
+                row,
+                f"برگه «{sheet.name}» — {len(sheet.blocks)} بلوک — دوره: "
+                f"{'، '.join(item['token'] for item in sheet.periods) or 'شناسایی نشد'}",
+                12,
+            )
+            row += 1
+            self._header(ws, row, [
+                "شناسه بلوک", "نوع", "محدوده", "ردیف‌های عنوان", "ستون‌ها",
+                "دوره‌های بلوک", "منابع دوره", "اطمینان دوره", "شاهد دوره",
+                "ادغام‌ها", "سلول‌های ثبت‌شده", "اطمینان ساختار",
+            ])
+            header_row = row
+            row += 1
+            if not sheet.blocks:
+                self._value_cell(ws, row, 1, "بلوکی شناسایی نشد.")
+                row += 1
+            for block in sheet.blocks:
+                evidence = "؛ ".join(
+                    f"{item['token']} ← {item['source_label']}"
+                    + (f" ({item['address']})" if item.get("address") else "")
+                    for item in block.period_evidence
+                )
+                merged = "، ".join(item.address for item in block.merged_ranges)
+                values = [
+                    block.block_id,
+                    block.kind,
+                    block.boundaries.get("address", ""),
+                    "، ".join(str(item) for item in block.header_rows),
+                    "، ".join(column.letter for column in block.columns),
+                    "، ".join(item["token"] for item in block.periods) or "—",
+                    "، ".join(
+                        sorted({source for item in block.periods for source in item["sources"]})
+                    ) or "—",
+                    f"{block.period_confidence:.0%}" if block.periods else "—",
+                    evidence or "—",
+                    merged or "—",
+                    f"{len(block.cells)}{' (محدودشده)' if block.cells_truncated else ''}",
+                    f"{block.confidence:.0%}",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 12)
+            for warning in sheet.warnings:
+                ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=12)
+                ws.cell(row, 1, "• " + warning).alignment = Alignment(horizontal="right", wrap_text=True)
+                row += 1
+
+        if model.warnings:
+            row += 1
+            self._section(ws, row, "هشدارهای سطح Workbook", 12)
+            row += 1
+            for warning in model.warnings:
+                ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=12)
+                ws.cell(row, 1, "• " + warning).alignment = Alignment(horizontal="right", wrap_text=True)
+                row += 1
+
+        self._widths(ws, {
+            "A": 22, "B": 12, "C": 14, "D": 12, "E": 22, "F": 24,
+            "G": 18, "H": 11, "I": 55, "J": 18, "K": 14, "L": 12,
+        })
+        ws.freeze_panes = "A5"
         self._print_setup(ws)

@@ -29,11 +29,18 @@ TOTAL_KEYWORDS = ("جمع", "مجموع", "کل", "total", "sum", "grand total",
 
 
 def is_total_label(text: object) -> bool:
-    """True when a cell text is a totals label (``جمع کل``, ``total`` ...)."""
+    """True when a cell text is a totals label (``جمع کل``, ``total`` ...).
+
+    Keywords match on word boundaries: ``کلانتری``, ``تکلیف`` and ``جمعیت`` are
+    ordinary labels, not totals.  ``جمع‌کل`` still matches because the ZWNJ is
+    normalized to a space before matching.
+    """
     if not isinstance(text, str):
         return False
     value = normalize_text(normalize_digits(text)).lower().strip(" :.-")
-    return any(keyword in value for keyword in TOTAL_KEYWORDS)
+    return any(header_matches(value, keyword) for keyword in TOTAL_KEYWORDS)
+
+
 INSTITUTION_TOKENS = (
     "بانک", "صندوق", "مؤسسه", "موسسه", "شرکت", "بیمه", "لیزینگ", "اعتباری",
     "قرض", "تعاونی", "سرمایه", "بورس", "صرافی", "تعاونی", "دانشگاه", "اداره",
@@ -197,6 +204,19 @@ class HeaderCandidate:
 JALALI_MONTHS = (
     "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
     "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند",
+)
+
+# Temporal keys are written as words in administrative workbooks.  The content
+# check below decides whether the column really is a year/month/day key, so a
+# header such as ``مبلغ ماهانه`` is not caught by the ``ماه`` token.
+TEMPORAL_KEY_WORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("year", ("سال", "year")),
+    ("month", ("ماه", "month")),
+    ("day", ("روز", "day")),
+)
+GROUP_KEY_WORDS = (
+    "گروه", "دسته", "طبقه", "رده", "نوع", "بخش",
+    "group", "category", "class", "type", "segment",
 )
 _TITLE_PERIOD = re.compile(r"(?<!\d)(1[34]\d{2}|19\d{2}|20\d{2})(?!\d)")
 
@@ -978,11 +998,23 @@ class SheetAnalyzer:
                     )
                 else:
                     profile.statistical_role = DataRole.UNKNOWN
+            elif (
+                profile.role not in NUMERIC_ROLES
+                and self._temporal_key_kind(profile.header, numbers) is not None
+            ):
+                profile.statistical_role = DataRole.TEMPORAL_KEY
+                profile.notes.append(
+                    "کلید زمانی (سال/ماه/روز) بر پایه عنوان و محتوا؛ در میانگین، واریانس و همبستگی وارد نمی‌شود."
+                )
             elif profile.role in NUMERIC_ROLES:
                 profile.statistical_role = DataRole.NUMERIC_MEASURE
             elif profile.text_ratio >= 0.5:
                 if 0 < profile.distinct <= max(20, int(profile.non_empty * 0.5)):
-                    profile.statistical_role = DataRole.CATEGORICAL
+                    profile.statistical_role = (
+                        DataRole.GROUP
+                        if self._is_group_header(profile.header)
+                        else DataRole.CATEGORICAL
+                    )
                 else:
                     profile.statistical_role = DataRole.TEXT
             elif profile.non_empty == 0:
@@ -1019,6 +1051,33 @@ class SheetAnalyzer:
                 except (TypeError, ValueError):
                     continue
         return values
+
+    @staticmethod
+    def _temporal_key_kind(header: str, values: list[float]) -> str | None:
+        """Year/month/day key when both the header word and the values agree."""
+        text = normalize_text(normalize_digits(header or "")).lower().strip(" :.-")
+        if not text or not values:
+            return None
+        integers = [int(value) for value in values if float(value).is_integer()]
+        if len(integers) != len(values):
+            return None
+        for kind, words in TEMPORAL_KEY_WORDS:
+            if not any(header_matches(text, word) for word in words):
+                continue
+            if kind == "year" and all(
+                1300 <= value <= 1500 or 1900 <= value <= 2100 for value in integers
+            ):
+                return kind
+            if kind == "month" and all(1 <= value <= 12 for value in integers):
+                return kind
+            if kind == "day" and all(1 <= value <= 31 for value in integers):
+                return kind
+        return None
+
+    @staticmethod
+    def _is_group_header(header: str) -> bool:
+        text = normalize_text(normalize_digits(header or "")).lower().strip(" :.-")
+        return bool(text) and any(header_matches(text, word) for word in GROUP_KEY_WORDS)
 
     @staticmethod
     def _is_day_of_month(values: list[float]) -> bool:

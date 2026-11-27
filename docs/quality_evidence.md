@@ -1,8 +1,10 @@
 # Quality evidence ledger — Local Office AI
 
 This ledger records the verified handoff state for the next engineering stage.
-**The work on this branch is Phase-1a preparation only; it is NOT completion of the agreed Prompt 01A.**
-The original Prompt 01A (Data Model, Workbook Structure, and Metadata Extraction) has not started.
+The preparation baseline was Phase-1a preparation only. **Prompt 01A (Data Model, Workbook
+Structure, and Metadata Extraction) is now implemented on
+`feature/prompt-01a-data-model-metadata`**, and its evidence is recorded at the end of this
+file. Prompt 01B has not started.
 
 ## Verified repository state
 
@@ -13,7 +15,7 @@ The original Prompt 01A (Data Model, Workbook Structure, and Metadata Extraction
 | Preparation branch | `fix/multisource-extraction-integrity` |
 | Preparation commits | `5b20cce` (tests + ledger), `06dae62` (sanitized handover + audit), followed by CI/documentation-preflight commits |
 | Phase 0 | Completed; see `PHASE0_BASELINE_AUDIT.md` |
-| Original Prompt 01A | **Not started** |
+| Original Prompt 01A | Implemented on `feature/prompt-01a-data-model-metadata` (evidence at end) |
 | Prompt 01B | **Not started** |
 | Production source fixes in this preparation | None |
 
@@ -42,8 +44,8 @@ The original report also recorded `--collect-only -> 202`. These are historical 
 
 | ID | Test | Guard | Defect state before implementation | Current CI policy |
 | :--- | :--- | :--- | :--- | :--- |
-| T2 | `test_total_label_needs_a_word_boundary` | G3 / R3 | Known defect: substring matching classifies labels such as `کلانتری ۱۲` as totals | `xfail(strict=True)` |
-| T3 | `test_year_month_day_columns_are_not_measures` | G5 / R4 | Known defect: `سال/ماه/روز` can be treated as numeric measures | `xfail(strict=True)` |
+| T2 | `test_total_label_needs_a_word_boundary` | G3 / R3 | **Fixed in Prompt 01A:** totals keywords match on word boundaries | Normal passing test |
+| T3 | `test_year_month_day_columns_are_not_measures` | G5 / R4 | **Fixed in Prompt 01A:** year/month/day keys are temporal, not measures | Normal passing test |
 | T4 | `test_code_columns_stay_identifiers` | G5 / R5 | Passes; R5 was not reproducible and must not be treated as a confirmed defect | Normal passing test |
 | T9 | `test_output_suffix_is_validated` | G11 / R8 | Known defect: XLSX content may be written under a `.docx` suffix | `xfail(strict=True)` |
 
@@ -88,3 +90,71 @@ The three failures were exactly T2, T3, and T9. Dependency installation and open
 - The next-stage branch `feature/prompt-01a-data-model-metadata` was created and verified at the same prepared baseline.
 - **Prompt 01A readiness: repository and handoff prepared.** The next AI may start the exact original Prompt 01A on the dedicated branch without repeating Phase 0. This CI run validates the code/tests/configuration at the stated commit; it does not validate the owner's local Windows installation, Ollama/Qwen, LHM, or the real administrative files.
 
+
+## Prompt 01A implementation evidence
+
+Branch: `feature/prompt-01a-data-model-metadata`. Base: the verified preparation baseline;
+`e7b491a200fee77c3bb394341c15d4efbf8ac408` remains an ancestor. `main` was not modified.
+
+### What changed
+
+- `src/local_office_ai/excel/period_detection.py` (new): period tokens from column
+  headers, worksheet names, block titles, row labels and filenames. Each token records
+  its evidence text, cell address (when one exists), source kind and confidence.
+  `status` is `detected`, `not_detected` or `conflicting`; scalar-source disagreements
+  are reported, not resolved. Month names match as words (`دی` no longer matches `ردیف`).
+- `src/local_office_ai/excel/extraction_model.py` (new): `WorkbookModel → SheetModel →
+  BlockModel → ColumnModel / CellRecord / MergedRangeRecord`. Projects the existing
+  detectors into block boundaries, header rows, parent/sub/period headers, business and
+  semantic roles, merged ranges with anchor values, original cell values, formulas, cell
+  addresses, periods and confidence. Attached as `AnalysisResult.extraction`; serialized
+  by `AnalysisResult.to_dict()`.
+- `structure_intelligence.py`: `SheetIntelligence` gains `filename_years`, `periods`,
+  `period_evidence`, `period_sources`, `period_status`, `period_confidence`; filename years
+  participate in `metadata_conflicts` (`filename_vs_sheet_name_year`,
+  `filename_vs_title_year`); month may fall back to the filename when sheet name and title
+  have none, with a warning.
+- `sheet_analyzer.py`: totals keywords match on word boundaries (T2 fix); year/month/day
+  headers whose content agrees become `DataRole.TEMPORAL_KEY` (T3 fix); low-cardinality
+  group headers become `DataRole.GROUP`.
+- `core/models.py`: `DataRole.GROUP`; `AnalysisResult.extraction`.
+- `generic_report.py` / `report_writer.py`: audit-only «مدل استخراج» sheet; clean profile
+  unchanged.
+- Tests: `tests/test_extraction_model.py` (10 tests) covers the seven required cases plus
+  no-period-without-evidence, filename-vs-sheet-name conflict and scalar-year merging.
+  T2 and T3 xfail markers removed; T9 remains `xfail(strict=True)`.
+
+### Test evidence [SBX]
+
+Sandbox: Linux, CPython 3.13.15. Not Windows-target validation.
+
+```text
+python -m pytest tests/test_extraction_model.py -o addopts="" -q
+-> 10 passed in 0.33s (exit 0)
+
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+-> 179 passed, 2 skipped, 36 deselected, 1 xfailed in 18.98s (exit 0)
+```
+
+The single `xfailed` outcome is T9, the still-open output-suffix defect. The 36 deselected
+tests are the `requires_sample` set; their private reference workbook is absent and they are
+not counted as passing.
+
+### End-to-end report evidence [SBX]
+
+A synthetic two-level-header workbook (`merged.xlsx`, block `A3:D7`) was analyzed with
+`run_engine.py --no-ai --yes`:
+
+```text
+clean profile: داشبورد، خلاصه اجرایی، شناسنامه داده، آمار توصیفی، روند و همبستگی،
+               اعتبارسنجی داده، موارد نیازمند بررسی
+audit profile: ... + مدل استخراج (block داده#B1, A3:D7, header rows 3/4,
+               periods 1403/1404 from column_header, merged C3:D3)
+```
+
+### Not validated
+
+- The owner's Windows environment `F:\Local-Office-AI` (Python 3.14) and its `venv`.
+- The three original administrative files and the private reference workbook. No
+  real-file acceptance is claimed; the owner runs that locally.
+- Ollama/Qwen narrative, ComfyUI, LibreHardwareMonitor, Tkinter and PySide6 runtime.

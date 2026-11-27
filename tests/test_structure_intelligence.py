@@ -240,15 +240,11 @@ def test_context_overflow_retries_and_falls_back_cleanly(structured_analysis, ol
     assert all(chunk["status"] == "failed" for chunk in outcome.metadata["chunks"])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known baseline defect G5/R4; remove this marker when temporal-key roles are implemented.",
-)
 def test_year_month_day_columns_are_not_measures(settings, make_workbook):
     """G5 / R4: سال، ماه و روز are temporal keys, never summed measures.
 
-    Red until the Excel role vocabulary learns the temporal words the document
-    reader already knows (P1).
+    The header word must agree with the content: integer years, months 1..12 and
+    days 1..31 are temporal keys, so they never enter sums or means.
     """
     path = make_workbook(
         "temporal_keys.xlsx",

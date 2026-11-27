@@ -36,9 +36,24 @@ from local_office_ai.core.settings import Settings
 from local_office_ai.excel.normalization import (
     EXCEL_ERRORS,
     jalali_to_gregorian,
+    looks_like_date,
+    looks_like_number,
     normalize_digits,
     normalize_text,
     parse_value,
+)
+from local_office_ai.excel.period_detection import (
+    KIND_MONTH,
+    KIND_YEAR,
+    SOURCE_BLOCK_TITLE,
+    SOURCE_COLUMN_HEADER,
+    SOURCE_FILENAME,
+    SOURCE_ROW_LABEL,
+    SOURCE_SHEET_NAME,
+    STATUS_CONFLICTING,
+    PeriodSource,
+    detect_periods,
+    scalar_conflicts,
 )
 from local_office_ai.excel.sheet_analyzer import (
     JALALI_MONTHS,
@@ -350,6 +365,12 @@ class SheetIntelligence:
     sheet_years: list[str] = field(default_factory=list)
     title_years: list[str] = field(default_factory=list)
     subheader_years: list[str] = field(default_factory=list)
+    filename_years: list[str] = field(default_factory=list)
+    periods: list[str] = field(default_factory=list)
+    period_evidence: list[dict[str, Any]] = field(default_factory=list)
+    period_sources: list[str] = field(default_factory=list)
+    period_status: str = "not_detected"
+    period_confidence: float = 0.0
     year_pairs: list[dict[str, Any]] = field(default_factory=list)
     derived: bool = False
     referenced_sheets: list[str] = field(default_factory=list)
@@ -403,6 +424,12 @@ class SheetIntelligence:
             "sheet_years": list(self.sheet_years),
             "title_years": list(self.title_years),
             "subheader_years": list(self.subheader_years),
+            "filename_years": list(self.filename_years),
+            "periods": list(self.periods),
+            "period_evidence": list(self.period_evidence),
+            "period_sources": list(self.period_sources),
+            "period_status": self.period_status,
+            "period_confidence": round(self.period_confidence, 3),
             "year_pairs": list(self.year_pairs),
             "derived": self.derived,
             "referenced_sheets": list(self.referenced_sheets),
@@ -477,6 +504,7 @@ class StructureIntelligenceAnalyzer:
         *,
         generic: Any = None,
         known_sheets: set[str] | None = None,
+        source_name: str = "",
     ) -> SheetIntelligence:
         intel = SheetIntelligence(
             sheet=grid.sheet_name,
@@ -487,6 +515,10 @@ class StructureIntelligenceAnalyzer:
             intel.status = STATUS_NONE
             intel.warnings.append("هیچ جدول داده‌ای در این برگه شناسایی نشد.")
             intel.row_roles = self._fallback_roles(grid)
+            self._apply_periods(
+                intel,
+                detect_periods(self._scalar_period_sources(grid.sheet_name, "", source_name)),
+            )
             return intel
 
         header_rows = primary.header_rows or [primary.header_row]
@@ -508,7 +540,19 @@ class StructureIntelligenceAnalyzer:
         intel.sheet_years = extract_periods([grid.sheet_name])
         intel.title_years = extract_periods([intel.title])
         intel.subheader_years = self._unique_periods(primary.columns)
+        intel.filename_years = extract_periods([source_name]) if source_name else []
         intel.year_pairs = self._build_pairs(primary.columns)
+        self._apply_periods(
+            intel,
+            detect_periods(self._period_sources(grid, primary, intel.title, source_name)),
+        )
+        if not intel.month and source_name:
+            filename_month, filename_index = month_from_text(source_name)
+            if filename_month:
+                intel.month, intel.month_index = filename_month, filename_index
+                intel.warnings.append(
+                    "ماه از نام فایل استنباط شد؛ نام برگه و عنوان هیچ ماهی نداشتند."
+                )
 
         intel.row_roles, intel.summary_rows = self._row_roles(grid, primary, header_rows)
         intel.derived, intel.referenced_sheets = self._references(
@@ -556,6 +600,108 @@ class StructureIntelligenceAnalyzer:
             if cells:
                 parts.append(" | ".join(cells))
         return " | ".join(parts)[:500]
+
+    # ------------------------------------------------------------------ #
+    # Period evidence
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _scalar_period_sources(
+        sheet_name: str,
+        title: str,
+        source_name: str,
+        title_address: str = "",
+    ) -> list[PeriodSource]:
+        sources = [PeriodSource(SOURCE_SHEET_NAME, sheet_name, address=sheet_name)]
+        if title:
+            sources.append(PeriodSource(SOURCE_BLOCK_TITLE, title, address=title_address))
+        if source_name:
+            sources.append(PeriodSource(SOURCE_FILENAME, source_name, address=source_name))
+        return sources
+
+    @staticmethod
+    def _title_address(grid: SheetGrid, header_row: int, title: str) -> str:
+        target = normalize_text(normalize_digits(title))
+        if not target:
+            return ""
+        for row in range(1, header_row):
+            for col in range(1, grid.max_col + 1):
+                cell = grid.get(row, col)
+                if cell is None or not isinstance(cell.value, str):
+                    continue
+                value = normalize_text(normalize_digits(cell.value))
+                if value and value in target:
+                    return f"{get_column_letter(col)}{row}"
+        return ""
+
+    def _period_sources(
+        self,
+        grid: SheetGrid,
+        table: TableCandidate,
+        title: str,
+        source_name: str,
+    ) -> list[PeriodSource]:
+        header_row = min(table.header_rows or [table.header_row])
+        sources = self._scalar_period_sources(
+            grid.sheet_name,
+            title,
+            source_name,
+            self._title_address(grid, header_row, title),
+        )
+        for column in table.columns:
+            text = " ".join(
+                part for part in (column.parent_header, column.sub_header, column.period) if part
+            )
+            if text:
+                sources.append(
+                    PeriodSource(SOURCE_COLUMN_HEADER, text, address=column.header_address)
+                )
+        for row in range(
+            table.first_data_row,
+            min(table.last_data_row, table.first_data_row + 499) + 1,
+        ):
+            label = self._row_label(grid, row, table.first_col, table.last_col)
+            if label and not looks_like_date(label) and not looks_like_number(label):
+                sources.append(
+                    PeriodSource(
+                        SOURCE_ROW_LABEL,
+                        label,
+                        address=self._row_label_address(
+                            grid, row, table.first_col, table.last_col, label
+                        ),
+                    )
+                )
+        return sources
+
+    @staticmethod
+    def _row_label_address(
+        grid: SheetGrid,
+        row: int,
+        first_col: int,
+        last_col: int,
+        label: str,
+    ) -> str:
+        target = normalize_text(normalize_digits(label))
+        for col in range(first_col, last_col + 1):
+            cell = grid.get(row, col)
+            if (
+                cell is not None
+                and isinstance(cell.value, str)
+                and normalize_text(normalize_digits(cell.value)) == target
+            ):
+                return f"{get_column_letter(col)}{row}"
+        return f"{get_column_letter(first_col)}{row}"
+
+    @staticmethod
+    def _apply_periods(intel: SheetIntelligence, detection: Any) -> None:
+        intel.periods = [item.token for item in detection.periods]
+        intel.period_evidence = [item.to_dict() for item in detection.evidence]
+        intel.period_sources = detection.sources
+        intel.period_status = detection.status
+        intel.period_confidence = detection.confidence
+        conflicts = scalar_conflicts(detection, dimension=KIND_YEAR)
+        conflicts.extend(scalar_conflicts(detection, dimension=KIND_MONTH))
+        if conflicts:
+            intel.period_status = STATUS_CONFLICTING
 
     @staticmethod
     def _unique_periods(columns: list[ColumnProfile]) -> list[str]:
@@ -815,6 +961,7 @@ class StructureIntelligenceAnalyzer:
         sheet_years = set(intel.sheet_years)
         title_years = set(intel.title_years)
         sub_years = set(intel.subheader_years)
+        filename_years = set(intel.filename_years)
         if sheet_years and title_years and not (sheet_years & title_years):
             conflicts.append(
                 MetadataConflict(
@@ -865,6 +1012,30 @@ class StructureIntelligenceAnalyzer:
                     kind="multiple_title_years",
                     message=f"عنوان اصلی چند سال مختلف را نام می‌برد: {sorted(title_years)}.",
                     values={"title_years": sorted(title_years)},
+                )
+            )
+        if filename_years and sheet_years and not (filename_years & sheet_years):
+            conflicts.append(
+                MetadataConflict(
+                    sheet=intel.sheet,
+                    kind="filename_vs_sheet_name_year",
+                    message=(
+                        f"سال نام فایل {sorted(filename_years)} با سال نام برگه {sorted(sheet_years)} "
+                        "یکسان نیست؛ هیچ منبعی بر دیگری ترجیح داده نشد."
+                    ),
+                    values={"filename_years": sorted(filename_years), "sheet_years": sorted(sheet_years)},
+                )
+            )
+        if filename_years and title_years and not (filename_years & title_years):
+            conflicts.append(
+                MetadataConflict(
+                    sheet=intel.sheet,
+                    kind="filename_vs_title_year",
+                    message=(
+                        f"سال نام فایل {sorted(filename_years)} با سال عنوان اصلی {sorted(title_years)} "
+                        "یکسان نیست."
+                    ),
+                    values={"filename_years": sorted(filename_years), "title_years": sorted(title_years)},
                 )
             )
         return conflicts
