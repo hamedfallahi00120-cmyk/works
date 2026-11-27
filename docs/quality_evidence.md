@@ -103,6 +103,9 @@ Branch: `feature/prompt-01a-data-model-metadata`. Base: the verified preparation
   its evidence text, cell address (when one exists), source kind and confidence.
   `status` is `detected`, `not_detected` or `conflicting`; scalar-source disagreements
   are reported, not resolved. Month names match as words (`دی` no longer matches `ردیف`).
+  A scalar month and a single scalar year combine into one `month_year` token; two scalar
+  years stay separate. Row-label evidence requires a numeric value on the same row, and a
+  bare year in a `سال`/`year` temporal-key column is row-label evidence too.
 - `src/local_office_ai/excel/extraction_model.py` (new): `WorkbookModel → SheetModel →
   BlockModel → ColumnModel / CellRecord / MergedRangeRecord`. Projects the existing
   detectors into block boundaries, header rows, parent/sub/period headers, business and
@@ -117,11 +120,16 @@ Branch: `feature/prompt-01a-data-model-metadata`. Base: the verified preparation
 - `sheet_analyzer.py`: totals keywords match on word boundaries (T2 fix); year/month/day
   headers whose content agrees become `DataRole.TEMPORAL_KEY` (T3 fix); low-cardinality
   group headers become `DataRole.GROUP`.
+- `table_detector.py`: a lone long text row after data starts ends the block, so a second
+  table's title is not absorbed into the first block; merged covered cells are now recorded
+  as `CellRecord` entries with `merged_anchor`/`merged_range`.
 - `core/models.py`: `DataRole.GROUP`; `AnalysisResult.extraction`.
 - `generic_report.py` / `report_writer.py`: audit-only «مدل استخراج» sheet; clean profile
   unchanged.
-- Tests: `tests/test_extraction_model.py` (10 tests) covers the seven required cases plus
-  no-period-without-evidence, filename-vs-sheet-name conflict and scalar-year merging.
+- Tests: `tests/test_extraction_model.py` (15 tests) covers the seven required cases plus
+  text and numeric-year row labels, cross-source month/year, role families, two stacked
+  blocks, no-period-without-evidence, filename-vs-sheet-name conflict and scalar-year
+  merging.
   T2 and T3 xfail markers removed; T9 remains `xfail(strict=True)`.
 
 ### Test evidence [SBX]
@@ -130,10 +138,10 @@ Sandbox: Linux, CPython 3.13.15. Not Windows-target validation.
 
 ```text
 python -m pytest tests/test_extraction_model.py -o addopts="" -q
--> 10 passed in 0.33s (exit 0)
+-> 15 passed in 0.38s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 179 passed, 2 skipped, 36 deselected, 1 xfailed in 18.98s (exit 0)
+-> 184 passed, 2 skipped, 36 deselected, 1 xfailed in 19.20s (exit 0)
 ```
 
 The single `xfailed` outcome is T9, the still-open output-suffix defect. The 36 deselected
@@ -150,6 +158,16 @@ clean profile: داشبورد، خلاصه اجرایی، شناسنامه دا�
                اعتبارسنجی داده، موارد نیازمند بررسی
 audit profile: ... + مدل استخراج (block داده#B1, A3:D7, header rows 3/4,
                periods 1403/1404 from column_header, merged C3:D3)
+```
+
+A second synthetic workbook with two stacked tables (`two_blocks.xlsx`) was run through
+`Coordinator.run(..., use_ai=False)`:
+
+```text
+clean profile: 8 delivery sheets, no مدل استخراج
+audit profile: 23 sheets incl. مدل استخراج
+               داده#B1 A2:C5 1403 block_title (A1)
+               داده#B2 A8:C11 1404 block_title (A7)
 ```
 
 ### Not validated

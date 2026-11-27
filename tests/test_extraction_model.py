@@ -138,6 +138,9 @@ def test_period_detected_from_filename(settings, make_workbook):
     analysis = _analyze(settings, path)
     block = _first_block(analysis, "داده")
 
+    assert analysis.extraction.source_filename == "آمار روزانه 1404.xlsx"
+    assert analysis.extraction.source_path.endswith("آمار روزانه 1404.xlsx")
+    assert block.sheet == "داده"
     assert _tokens(block.periods) == {"1404"}
     assert block.periods[0]["sources"] == ["filename"]
     assert analysis.extraction.period_status == "detected"
@@ -240,7 +243,154 @@ def test_multi_row_headers_and_merged_parent(settings, make_workbook):
     assert merged["C3:D3"].anchor_value == "تعداد اعمال قانون"
     cells = {cell.address: cell for cell in block.cells}
     assert cells["C3"].merged_range == "C3:D3"
+    assert cells["D3"].merged_anchor == "C3"
+    assert cells["D3"].merged_range == "C3:D3"
+    assert merged["C3:D3"].width == 2
     assert {"1403", "1404"} <= _tokens(block.periods)
+
+
+def test_period_detected_from_row_labels(settings, make_workbook):
+    """Month names in the first column are period evidence, not measures."""
+    path = make_workbook(
+        "row_labels.xlsx",
+        {
+            "داده": [
+                ["ماه", "مقدار", "تعداد"],
+                ["فروردین", 10, 1],
+                ["اردیبهشت", 12, 2],
+                ["خرداد", 14, 3],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    block = _first_block(analysis, "داده")
+
+    assert _tokens(block.periods) == {"فروردین", "اردیبهشت", "خرداد"}
+    assert all(period["sources"] == ["row_label"] for period in block.periods)
+    assert {item["address"] for item in block.period_evidence} == {"A2", "A3", "A4"}
+
+
+def test_period_detected_from_year_row_labels(settings, make_workbook):
+    """A year key column supplies periods and never becomes a numeric measure."""
+    path = make_workbook(
+        "year_column.xlsx",
+        {
+            "داده": [
+                ["سال", "مبلغ", "تعداد"],
+                [1403, 100, 1],
+                [1404, 200, 2],
+                [1405, 300, 3],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    block = _first_block(analysis, "داده")
+
+    assert _tokens(block.periods) == {"1403", "1404", "1405"}
+    assert all(period["sources"] == ["row_label"] for period in block.periods)
+    assert {item["address"] for item in block.period_evidence} == {"A2", "A3", "A4"}
+    roles = {column.header: column.semantic_role for column in block.columns}
+    assert roles["سال"] == "temporal_key"
+    assert roles["مبلغ"] == "numeric_measure"
+    assert {column.header for column in analysis.intelligence.sheet("داده").measures} == {
+        "مبلغ",
+        "تعداد",
+    }
+
+
+def test_month_from_sheet_name_and_year_from_filename_are_combined(settings, make_workbook):
+    """Scalar month and scalar year describe one period, not two fragments."""
+    path = make_workbook(
+        "آمار 1403.xlsx",
+        {
+            "فروردین": [
+                ["شرح", "مقدار", "تعداد"],
+                ["الف", 10, 1],
+                ["ب", 12, 2],
+                ["ج", 14, 3],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    block = _first_block(analysis, "فروردین")
+
+    assert _tokens(block.periods) == {"فروردین 1403"}
+    period = block.periods[0]
+    assert period["kind"] == "month_year"
+    assert period["sources"] == ["sheet_name", "filename"]
+    assert period["confidence"] < 0.7
+    assert {item["token"] for item in block.period_evidence} == {"فروردین", "1403"}
+    assert analysis.extraction.periods[0]["token"] == "فروردین 1403"
+
+
+def test_administrative_codes_groups_and_categories_are_distinguished(settings, make_workbook):
+    """Identifier, temporal, group, category and measure roles stay separate."""
+    path = make_workbook(
+        "role_families.xlsx",
+        {
+            "داده": [
+                ["شماره پرونده", "شناسه ملی", "تاریخ ثبت", "گروه", "شرح", "مبلغ"],
+                [1001, 2184, "1404/01/15", "الف", "x", 1000],
+                [1002, 2079, "1404/02/03", "ب", "y", 2000],
+                [1003, 2047, "1404/02/10", "الف", "z", 3000],
+                [1004, 2185, "1404/03/01", "ب", "w", 4000],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    block = _first_block(analysis, "داده")
+    roles = {column.header: column.semantic_role for column in block.columns}
+
+    assert roles["شماره پرونده"] == "identifier"
+    assert roles["شناسه ملی"] == "identifier"
+    assert roles["تاریخ ثبت"] == "temporal_key"
+    assert roles["گروه"] == "group"
+    assert roles["شرح"] == "categorical"
+    assert roles["مبلغ"] == "numeric_measure"
+    assert all(0 < column.role_confidence <= 1 for column in block.columns)
+    assert {column.header for column in analysis.intelligence.sheet("داده").measures} == {"مبلغ"}
+
+
+def test_two_blocks_on_one_sheet_stay_separate(settings, make_workbook):
+    """Two stacked tables keep their own boundaries, ids, titles and periods."""
+
+    def merge_titles(workbook):
+        workbook["داده"].merge_cells("A1:C1")
+        workbook["داده"].merge_cells("A7:C7")
+
+    path = make_workbook(
+        "two_blocks.xlsx",
+        {
+            "داده": [
+                ["جدول اول 1403"],
+                ["شرح", "مقدار", "تعداد"],
+                ["الف", 10, 1],
+                ["ب", 12, 2],
+                ["ج", 14, 3],
+                [],
+                ["جدول دوم 1404"],
+                ["شرح", "مقدار", "تعداد"],
+                ["د", 20, 4],
+                ["ه", 22, 5],
+                ["و", 24, 6],
+            ]
+        },
+        merge_titles,
+    )
+    analysis = _analyze(settings, path)
+    sheet = analysis.extraction.sheet("داده")
+
+    assert [block.block_id for block in sheet.blocks] == ["داده#B1", "داده#B2"]
+    first, second = sheet.blocks
+    assert first.boundaries["address"] == "A2:C5"
+    assert second.boundaries["address"] == "A8:C11"
+    assert first.title == "جدول اول 1403"
+    assert second.title == "جدول دوم 1404"
+    assert first.kind == second.kind == "generic"
+    assert 0 < first.confidence <= 1 and 0 < second.confidence <= 1
+    assert _tokens(first.periods) == {"1403"}
+    assert _tokens(second.periods) == {"1404"}
+    assert _tokens(analysis.extraction.periods) == {"1403", "1404"}
 
 
 def test_no_period_is_invented_without_evidence(settings, make_workbook):

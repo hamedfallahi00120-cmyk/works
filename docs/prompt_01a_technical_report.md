@@ -33,6 +33,20 @@ intelligence from `ExcelIntelligenceWorkflow`. It is attached as
 `AnalysisResult.extraction` and serialized by `AnalysisResult.to_dict()` into the processed
 JSON sidecar. The delivered workbook is untouched unless the audit profile is active.
 
+### 2.1 Existing components identified
+
+| Responsibility | Existing component | Prompt 01A change |
+| :--- | :--- | :--- |
+| Workbook inspection | `excel/reader.py::WorkbookReader`, `excel/workbook_inspector.py::inspect_workbook` | filename passed into structure analysis |
+| Worksheet inspection | `workbook_inspector.py::inspect_sheet`, `sheet_analyzer.py::SheetGrid` | projected into `SheetModel` |
+| Header detection | `sheet_analyzer.py::SheetAnalyzer.score_header/detect_header_band`, `HeaderBand` | reused; header rows and parent/sub identity preserved |
+| Merged-cell handling | `SheetGrid.merged_ranges/merged_map/merged_span` | projected as `MergedRangeRecord` and per-cell anchor/range |
+| Table and block detection | `excel/table_detector.py::TableDetector` | lone section title no longer swallowed; blocks projected as `BlockModel` |
+| Period and date extraction | `normalization.parse_value`, `sheet_analyzer.extract_periods` | new `period_detection.py` with five evidence sources |
+| Column-role identification | `sheet_analyzer.assign_statistical_roles`, `structure_intelligence` | word-boundary totals, temporal keys, `GROUP` role |
+
+No detector is duplicated. The extraction model is a projection plus period evidence.
+
 ## 3. Data model
 
 | Level | Preserved |
@@ -67,6 +81,13 @@ Rules:
 - One year plus one or more months produces `month_year` tokens such as `فروردین 1403`.
   Multiple years produce separate year tokens plus any bare month token; the code never
   pairs a month with a year it cannot justify.
+- A scalar month and a single scalar year from different sources are joined
+  (`فروردین` sheet + `آمار 1403.xlsx` -> `فروردین 1403`). Two scalar years stay separate
+  because the pairing would be a guess.
+- Row-label evidence is accepted only when the same row carries a numeric value, so a
+  section title or a note row is never mistaken for a period label. A bare year in a
+  temporal-key column (`سال`/`year`) is also row-label evidence, so a year-keyed table is
+  not left with `not_detected`.
 - Disagreement between scalar sources (sheet name, title, filename) for the same dimension
   is reported as a conflict and sets `status="conflicting"`. No source is preferred.
 - If no source yields a period, `status="not_detected"` and the token list stays empty.
@@ -96,6 +117,8 @@ Rules:
 - `src/local_office_ai/excel/structure_intelligence.py` — period fields, title address,
   filename conflicts, row-label filtering.
 - `src/local_office_ai/excel/sheet_analyzer.py` — total boundaries, temporal keys, groups.
+- `src/local_office_ai/excel/table_detector.py` — a lone long text row after data starts
+  ends the block, so a following table's title is not absorbed into the previous block.
 - `src/local_office_ai/core/models.py` — `DataRole.GROUP`, `AnalysisResult.extraction`.
 - `src/local_office_ai/app/workflow.py` — build and attach the extraction model.
 - `src/local_office_ai/excel/generic_report.py`, `report_writer.py` — audit-only
@@ -107,43 +130,57 @@ Rules:
 
 ## 7. Tests
 
-`tests/test_extraction_model.py` covers the seven required cases plus three guards:
+`tests/test_extraction_model.py` covers the seven required cases plus eight guards:
 
 1. period from column headers (`D1`, `E1`);
 2. period from worksheet name (`فروردین 1403`);
 3. period from block title (merged `A1:C1`, evidence address `A1`);
-4. period from filename (`آمار روزانه 1404.xlsx`);
+4. period from filename (`آمار روزانه 1404.xlsx`), plus `source_filename`/`source_path`;
 5. date/identifier columns are not measures;
 6. original cell references, raw values and formulas (`=B2*2`) are preserved;
-7. multi-row header with merged parent (`C3:D3`), child periods and header addresses;
-8. no period is invented without evidence (`not_detected`, empty lists);
-9. filename vs sheet-name period conflict is reported, not resolved;
-10. a filename year merges into the sheet's month-year token instead of duplicating it.
+7. multi-row header with merged parent (`C3:D3`), child periods, header addresses and
+   merged-child anchors (`D3 -> C3`);
+8. period from text row labels (`A2:A4`) with numeric rows only;
+9. period from a numeric year key column (`سال` rows `A2:A4`) without making it a measure;
+10. a sheet month plus a single filename year combine into one `month_year` token;
+11. administrative codes, group and category columns stay out of measures;
+12. two stacked tables keep separate ids, boundaries, titles and periods;
+13. no period is invented without evidence (`not_detected`, empty lists);
+14. filename vs sheet-name period conflict is reported, not resolved;
+15. a filename year merges into the sheet's month-year token instead of duplicating it.
 
 ## 8. Evidence (sandbox, CPython 3.13.15)
 
 ```text
 python -m pytest tests/test_extraction_model.py -o addopts="" -q
--> 10 passed in 0.33s (exit 0)
+-> 15 passed in 0.38s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 179 passed, 2 skipped, 36 deselected, 1 xfailed in 18.98s (exit 0)
+-> 184 passed, 2 skipped, 36 deselected, 1 xfailed in 19.20s (exit 0)
 ```
 
 The `xfailed` case is T9 (output suffix), intentionally still open. The 36 deselected tests
 are `requires_sample` and are not counted as passing.
 
-End-to-end `run_engine.py --no-ai --yes` on a synthetic two-level-header workbook:
+End-to-end `Coordinator.run(..., use_ai=False)` on synthetic workbooks:
 
-- clean profile: no extraction sheet; unchanged delivery sheets.
-- audit profile: «مدل استخراج» lists block `داده#B1`, `A3:D7`, header rows 3/4, periods
-  `1403`/`1404` from `column_header`, merged range `C3:D3`.
+- two-level-header workbook: clean profile has no extraction sheet; audit profile lists
+  block `داده#B1`, `A3:D7`, header rows 3/4, periods `1403`/`1404` from `column_header`,
+  merged range `C3:D3`.
+- two stacked tables (`two_blocks.xlsx`): clean profile writes 8 delivery sheets and no
+  extraction sheet; audit profile writes 23 sheets, and «مدل استخراج» contains
+  `داده#B1 A2:C5 1403 block_title (A1)` and `داده#B2 A8:C11 1404 block_title (A7)`.
 
 ## 9. Limitations and out of scope
 
 - Sandbox evidence only. The owner's Windows 3.14 environment, Ollama/Qwen, ComfyUI,
   LibreHardwareMonitor, Tkinter/PySide6 runtime and real administrative files were not
   exercised.
-- Row-label period evidence is limited to the first 500 data rows; cell records are capped
-  at 4000 per block (`cells_truncated`). Boundaries, headers and columns remain complete.
+- Row-label period evidence is limited to the first 300 data rows per block (500 for sheet
+  intelligence) and requires a numeric value on the same row. Cell records are capped at
+  4000 per block (`cells_truncated`). Boundaries, headers and columns remain complete.
+- A lone long text row ends a block only when the next non-empty row is a header or the
+  region ends. A short (<=3 characters) note row is not treated as a boundary.
+- The model reports period tokens; it does not yet drive `PeriodIntegration` or year-pair
+  comparison from them. That integration belongs to a later stage.
 - No statistical reconciliation engine, no UI redesign, no Prompt 01B work.

@@ -50,7 +50,9 @@ from local_office_ai.excel.period_detection import (
     SOURCE_SHEET_NAME,
     PeriodDetection,
     PeriodSource,
+    cell_text,
     detect_periods,
+    looks_like_year,
     scalar_conflicts,
 )
 from local_office_ai.excel.sheet_analyzer import SheetGrid
@@ -474,8 +476,7 @@ class ExtractionModelBuilder:
                     return _cell_address(row, col)
         return ""
 
-    @staticmethod
-    def _row_label_sources(grid: SheetGrid, table: TableCandidate) -> list[PeriodSource]:
+    def _row_label_sources(self, grid: SheetGrid, table: TableCandidate) -> list[PeriodSource]:
         sources: list[PeriodSource] = []
         limit = min(
             table.last_data_row,
@@ -486,14 +487,48 @@ class ExtractionModelBuilder:
                 cell = grid.get(row, col)
                 if cell is None or cell.is_empty:
                     continue
+                text = cell_text(cell.value)
+                if not text:
+                    continue
+                if self._column_is_temporal(table, col) and looks_like_year(text):
+                    sources.append(
+                        PeriodSource(SOURCE_ROW_LABEL, text, address=_cell_address(row, col))
+                    )
+                    continue
                 if not isinstance(cell.value, str):
                     continue
-                text = cell.value.strip()
-                if not text or looks_like_date(text) or looks_like_number(text):
+                if looks_like_date(text) or looks_like_number(text):
+                    continue
+                if not self._row_has_numeric(grid, table, row):
                     continue
                 sources.append(PeriodSource(SOURCE_ROW_LABEL, text, address=_cell_address(row, col)))
                 break
         return sources
+
+    @staticmethod
+    def _column_is_temporal(table: TableCandidate, col: int) -> bool:
+        for column in table.columns:
+            if column.index != col:
+                continue
+            if column.statistical_role is DataRole.TEMPORAL_KEY:
+                return True
+            header = normalize_text(normalize_digits(column.header))
+            return "سال" in header or "year" in header.lower()
+        return False
+
+    @staticmethod
+    def _row_has_numeric(grid: SheetGrid, table: TableCandidate, row: int) -> bool:
+        for col in range(table.first_col, table.last_col + 1):
+            cell = grid.get(row, col)
+            if cell is None or cell.is_empty:
+                continue
+            if isinstance(cell.value, bool):
+                continue
+            if isinstance(cell.value, (int, float)):
+                return True
+            if isinstance(cell.value, str) and looks_like_number(cell.value):
+                return True
+        return False
 
     # ------------------------------------------------------------------ #
     def _build_block(
@@ -590,11 +625,11 @@ class ExtractionModelBuilder:
         for row in range(first_row, table.last_data_row + 1):
             for col in range(table.first_col, table.last_col + 1):
                 cell = grid.get(row, col)
-                if cell is None:
+                span = grid.merged_span(row, col)
+                if cell is None and span is None:
                     continue
                 if len(records) >= max_cells:
                     return records, True
-                span = grid.merged_span(row, col)
                 anchor = grid.merged_map.get((row, col))
                 records.append(
                     CellRecord(
@@ -602,10 +637,10 @@ class ExtractionModelBuilder:
                         row=row,
                         column=col,
                         letter=get_column_letter(col),
-                        value=cell.value,
-                        formula=cell.formula,
-                        data_type=cell.data_type,
-                        number_format=cell.number_format,
+                        value=cell.value if cell is not None else None,
+                        formula=cell.formula if cell is not None else None,
+                        data_type=cell.data_type if cell is not None else "n",
+                        number_format=cell.number_format if cell is not None else "",
                         merged_anchor=_cell_address(*anchor) if anchor else None,
                         merged_range=(
                             _range_address(*span) if span is not None else None

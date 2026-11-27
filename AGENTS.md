@@ -43,6 +43,11 @@ reintroduce substring totals matching or let temporal keys back into numeric mea
   keeps its evidence text, address, source and confidence; `status` is `detected`,
   `not_detected` or `conflicting`. No period is invented when evidence is insufficient.
   Scalar-source disagreements are reported, never resolved by preferring one source.
+  A scalar month (`فروردین` sheet) and a single scalar year (filename) are joined into
+  `فروردین 1403`; multiple scalar years stay separate because the pairing would be a guess.
+  Row-label evidence requires a numeric value on the same row, so a section title or note
+  is never mistaken for a period label. A bare year in a `سال`/`year` temporal-key column
+  is row-label evidence too; it stays a `TEMPORAL_KEY`, never a measure.
 - `excel/extraction_model.py` — `WorkbookModel → SheetModel → BlockModel → ColumnModel/
   CellRecord/MergedRangeRecord`. It projects the existing detectors (it does not
   re-detect): block boundaries, header rows, parent/sub/period headers, business and
@@ -55,10 +60,15 @@ reintroduce substring totals matching or let temporal keys back into numeric mea
 - `DataRole.GROUP` separates low-cardinality group columns (`گروه`, `دسته`, `نوع` ...)
   from free text; `DATA_ROLE_FA` maps it to «گروه‌بندی».
 - The audit profile writes the new «مدل استخراج» sheet; the clean profile never does.
+- `TableDetector` now stops a block at a lone long text row after data begins when the next
+  non-empty row is a header (or the region ends), so a second table's title is not swallowed
+  into the first block's data range. A sheet with two stacked tables yields two blocks with
+  their own boundaries, titles and periods.
 
-Known limits: row-label period evidence is scanned for the first 500 data rows per sheet
-and cells are capped at 4000 per block (`cells_truncated` flags the cap). Block boundaries,
-headers and columns stay complete even when cells are truncated.
+Known limits: row-label period evidence is scanned for the first 300 data rows per block
+(500 for sheet intelligence), and cells are capped at 4000 per block (`cells_truncated`
+flags the cap). Block boundaries, headers and columns stay complete even when cells are
+truncated.
 
 ### Instructions for the next AI agent
 
@@ -69,9 +79,9 @@ headers and columns stay complete even when cells are truncated.
    `PHASE0_BASELINE_AUDIT.md`, this guide and `docs/quality_evidence.md`.
 4. Treat the Phase 0 audit and its recorded evidence as the accepted project baseline.
    Do not repeat the full audit or ask the user to resend these repository documents.
-5. Execute only the exact original Prompt 01A supplied by the user:
-   **Data Model, Workbook Structure, and Metadata Extraction**. Do not substitute
-   Phase 1a of the audit for Prompt 01A, and do not drift into Prompt 01B.
+5. Prompt 01A (**Data Model, Workbook Structure, and Metadata Extraction**) is already
+   implemented on this branch. Do not repeat it or substitute audit Phase 1a for it.
+   The next engineering action is Prompt 01B, and only after the owner accepts 01A.
 6. Follow the supplied shared execution contract: one dedicated branch per stage,
    focused tests, actual evidence, no merge/push to `main`, no rewrite of project
    architecture, Python as the numeric source of truth, and Qwen for narrative only.

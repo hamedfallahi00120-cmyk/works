@@ -141,6 +141,14 @@ class TableDetector:
                 break
             if self._row_is_repeated_header(analyzer, grid, row, first_col, last_col, region_end):
                 break
+            if (
+                last_data >= data_start
+                and self._row_is_lone_title(grid, row, first_col, last_col)
+                and self._row_starts_new_block(
+                    analyzer, grid, row, first_col, last_col, region_end
+                )
+            ):
+                break
             fill_ratio = filled / width
             if fill_ratio < 0.3 and last_data >= data_start:
                 break
@@ -280,6 +288,42 @@ class TableDetector:
             if isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
                 numeric_like += 1
         return numeric_like == 0
+
+    def _row_starts_new_block(
+        self,
+        analyzer: SheetAnalyzer,
+        grid: SheetGrid,
+        row: int,
+        first_col: int,
+        last_col: int,
+        region_end: int,
+    ) -> bool:
+        """True when the next non-empty row is a header or the region ends."""
+        for candidate in range(row + 1, min(row + 4, region_end + 1)):
+            filled = grid.row_non_empty_count(candidate, first_col, last_col)
+            if filled == 0:
+                continue
+            return self._row_is_repeated_header(
+                analyzer, grid, candidate, first_col, last_col, region_end
+            )
+        return True
+
+    @staticmethod
+    def _row_is_lone_title(grid: SheetGrid, row: int, first_col: int, last_col: int) -> bool:
+        """A single long text cell after data starts is a section title, not a row."""
+        cells = [
+            cell
+            for col in range(first_col, last_col + 1)
+            if (cell := grid.get(row, col)) is not None and not cell.is_empty
+        ]
+        if len(cells) != 1:
+            return False
+        value = cells[0].value
+        return (
+            isinstance(value, str)
+            and not looks_like_number(value)
+            and len(value.strip()) > 3
+        )
 
     @staticmethod
     def _row_is_label_value(grid: SheetGrid, row: int, first_col: int, last_col: int) -> bool:

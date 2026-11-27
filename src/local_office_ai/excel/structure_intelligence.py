@@ -52,7 +52,9 @@ from local_office_ai.excel.period_detection import (
     SOURCE_SHEET_NAME,
     STATUS_CONFLICTING,
     PeriodSource,
+    cell_text,
     detect_periods,
+    looks_like_year,
     scalar_conflicts,
 )
 from local_office_ai.excel.sheet_analyzer import (
@@ -659,8 +661,16 @@ class StructureIntelligenceAnalyzer:
             table.first_data_row,
             min(table.last_data_row, table.first_data_row + 499) + 1,
         ):
+            year_source = self._year_row_source(grid, row, table)
+            if year_source is not None:
+                sources.append(year_source)
             label = self._row_label(grid, row, table.first_col, table.last_col)
-            if label and not looks_like_date(label) and not looks_like_number(label):
+            if (
+                label
+                and not looks_like_date(label)
+                and not looks_like_number(label)
+                and self._row_has_numeric(grid, row, table.columns)
+            ):
                 sources.append(
                     PeriodSource(
                         SOURCE_ROW_LABEL,
@@ -671,6 +681,35 @@ class StructureIntelligenceAnalyzer:
                     )
                 )
         return sources
+
+    def _year_row_source(
+        self,
+        grid: SheetGrid,
+        row: int,
+        table: TableCandidate,
+    ) -> PeriodSource | None:
+        last_col = min(table.last_col, table.first_col + 1)
+        for col in range(table.first_col, last_col + 1):
+            cell = grid.get(row, col)
+            if cell is None or cell.is_empty:
+                continue
+            text = cell_text(cell.value)
+            if self._column_is_temporal(table, col) and looks_like_year(text):
+                return PeriodSource(
+                    SOURCE_ROW_LABEL, text, address=f"{get_column_letter(col)}{row}"
+                )
+        return None
+
+    @staticmethod
+    def _column_is_temporal(table: TableCandidate, col: int) -> bool:
+        for column in table.columns:
+            if column.index != col:
+                continue
+            if column.statistical_role is DataRole.TEMPORAL_KEY:
+                return True
+            header = normalize_text(normalize_digits(column.header))
+            return "سال" in header or "year" in header.lower()
+        return False
 
     @staticmethod
     def _row_label_address(

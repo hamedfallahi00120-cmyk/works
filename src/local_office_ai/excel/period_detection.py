@@ -30,6 +30,26 @@ SOURCE_LABELS_FA = {
     SOURCE_FILENAME: "نام فایل",
 }
 
+_YEAR_ONLY = re.compile(r"^(?:13|14|19|20)\d{2}$")
+
+
+def looks_like_year(text: object) -> bool:
+    """True for a bare four-digit year such as ``1403``, not a date or amount."""
+    value = normalize_text(normalize_digits(str(text or ""))).strip()
+    return bool(_YEAR_ONLY.fullmatch(value))
+
+
+def cell_text(value: Any) -> str:
+    """Text for period matching; integral floats lose their ``.0`` suffix."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (int, float)) and float(value).is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
 # Explicit header evidence outranks a title, a title outranks a row label, and a
 # sheet name outranks the filename.  A single weak source is still reported, but
 # with the confidence of that source only.
@@ -207,7 +227,9 @@ def detect_periods(sources: Iterable[PeriodSource]) -> PeriodDetection:
             if source.source not in period.sources:
                 period.sources.append(source.source)
 
-    detection.periods = _merge_scalar_years(list(by_token.values()))
+    detection.periods = _combine_scalar_month_year(
+        _merge_scalar_years(list(by_token.values()))
+    )
     if detection.periods:
         detection.status = STATUS_DETECTED
         detection.confidence = max(item.confidence for item in detection.periods)
@@ -255,6 +277,56 @@ def _merge_scalar_years(periods: list[DetectedPeriod]) -> list[DetectedPeriod]:
             for evidence in period.evidence:
                 if evidence.source not in target.sources:
                     target.sources.append(evidence.source)
+    return kept
+
+
+def _scalar_only(period: DetectedPeriod) -> bool:
+    return bool(period.evidence) and all(
+        evidence.source in SCALAR_SOURCES for evidence in period.evidence
+    )
+
+
+def _combine_scalar_month_year(periods: list[DetectedPeriod]) -> list[DetectedPeriod]:
+    """Join a scalar month and a single scalar year into one ``month_year`` token.
+
+    Monthly workbooks often name the sheet ``فروردین`` and put the year only in
+    the filename or the title.  Combining is safe only when every month and the
+    year come from scalar sources and exactly one year is present; otherwise the
+    tokens stay separate because the pairing would be a guess.
+    """
+    months = [period for period in periods if period.kind == KIND_MONTH and _scalar_only(period)]
+    years = [period for period in periods if period.kind == KIND_YEAR and _scalar_only(period)]
+    if not months or not years:
+        return periods
+    year_tokens = {period.token for period in years}
+    if len(year_tokens) != 1:
+        return periods
+    year = next(iter(year_tokens))
+    consumed = {id(period) for period in months} | {id(period) for period in years}
+    by_token = {
+        period.token: period for period in periods if period.kind == KIND_MONTH_YEAR
+    }
+    combined: list[DetectedPeriod] = []
+    for month in months:
+        token = f"{month.token} {year}"
+        target = by_token.get(token)
+        if target is None:
+            target = DetectedPeriod(
+                token=token,
+                kind=KIND_MONTH_YEAR,
+                confidence=min(month.confidence, min(item.confidence for item in years)),
+            )
+            by_token[token] = target
+            combined.append(target)
+        for period in (month, *years):
+            for evidence in period.evidence:
+                if evidence not in target.evidence:
+                    target.evidence.append(evidence)
+            for source in period.sources:
+                if source not in target.sources:
+                    target.sources.append(source)
+    kept = [period for period in periods if id(period) not in consumed]
+    kept.extend(combined)
     return kept
 
 
