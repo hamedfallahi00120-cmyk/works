@@ -159,6 +159,18 @@ def test_total_label_helper():
     assert not is_total_label(None)
 
 
+def test_total_label_needs_a_word_boundary():
+    """G3 / R3: a label that merely contains جمع/کل is not a totals row.
+
+    Red until is_total_label switches to the word-boundary rule that the
+    statistics channel already uses (P0).
+    """
+    for label in ("کلانتری ۱۲", "تکلیف", "جمعیت", "کلاسه پرونده"):
+        assert not is_total_label(label), label
+    for label in ("جمع", "جمع کل", "مجموع", "Total"):
+        assert is_total_label(label), label
+
+
 def test_low_confidence_structure_is_flagged(make_workbook, settings):
     path = make_workbook(
         "weird.xlsx",
