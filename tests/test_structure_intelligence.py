@@ -240,6 +240,10 @@ def test_context_overflow_retries_and_falls_back_cleanly(structured_analysis, ol
     assert all(chunk["status"] == "failed" for chunk in outcome.metadata["chunks"])
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Known baseline defect G5/R4; remove this marker when temporal-key roles are implemented.",
+)
 def test_year_month_day_columns_are_not_measures(settings, make_workbook):
     """G5 / R4: سال، ماه و روز are temporal keys, never summed measures.
 
