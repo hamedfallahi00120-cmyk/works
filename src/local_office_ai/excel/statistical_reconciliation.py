@@ -28,6 +28,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from local_office_ai.core.models import AnalysisResult, TableCandidate, ValueKind
 from local_office_ai.core.settings import Settings
+from local_office_ai.excel.duplicate_control import CategoryRelation, RelationKind
 from local_office_ai.excel.normalization import normalize_digits, normalize_text, parse_value
 from local_office_ai.excel.row_classification import (
     ROW_CATEGORY,
@@ -1179,7 +1180,14 @@ class StatisticalReconciler:
             if grid is None:
                 continue
             block = self._semantic_block(analysis, table)
-            report.reconciliations.extend(self._block_reconciliations(grid, table, block))
+            report.reconciliations.extend(
+                self._block_reconciliations(
+                    grid,
+                    table,
+                    block,
+                    parent_relations=self._parent_relations(analysis, table),
+                )
+            )
             report.averages.extend(self._block_averages(grid, table, block))
         report.reconciliations.extend(self._monthly_reconciliations(analysis))
         report.comparisons.extend(self._period_comparisons(analysis))
@@ -1275,11 +1283,52 @@ class StatisticalReconciler:
         return None, True
 
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _parent_relations(
+        analysis: AnalysisResult, table: TableCandidate
+    ) -> list[CategoryRelation]:
+        duplicate = getattr(analysis, "duplicate_control", None)
+        relations: list[CategoryRelation] = []
+        for relation in getattr(duplicate, "category_relations", []) or []:
+            if relation.kind is not RelationKind.PARENT_OF:
+                continue
+            if relation.sheet != table.sheet or not relation.child_rows:
+                continue
+            if not (table.first_data_row <= relation.parent_row <= table.last_data_row):
+                continue
+            relations.append(relation)
+        return relations
+
+    @staticmethod
+    def _parent_note(
+        result: ReconciliationResult,
+        excluded: Sequence[AggregationComponent],
+        *,
+        probable: bool,
+    ) -> ReconciliationResult:
+        if not excluded:
+            return result
+        labels = "، ".join(component.label for component in excluded)
+        note = (
+            f"ردیف‌های والد ({labels}) از جمع اجزا کنار گذاشته شدند تا با فرزندان "
+            "دوبار شمرده نشوند."
+        )
+        if probable:
+            note += " رابطه والد/فرزند احتمالی است و نیازمند بازبینی است."
+        else:
+            note += " رابطه والد/فرزند از تطابق مقدارها استنباط شده و نیازمند تأیید است."
+        if result.status is ReconciliationStatus.PASS:
+            result.status = ReconciliationStatus.WARNING
+        result.explanation = f"{result.explanation} {note}"
+        return result
+
     def _block_reconciliations(
         self,
         grid: SheetGrid,
         table: TableCandidate,
         block: SemanticBlock | None,
+        *,
+        parent_relations: Sequence[CategoryRelation] | None = None,
     ) -> list[ReconciliationResult]:
         fields = self._fields(block, table)
         headers = list(table.header_rows or [table.header_row])
@@ -1325,6 +1374,34 @@ class StatisticalReconciler:
             data_components = self._components(
                 grid, table, data_rows, column, labels, field, role=ROLE_DATA
             )
+            column_relations = [
+                relation
+                for relation in parent_relations or []
+                if not relation.column
+                or not field.header
+                or field.header
+                in [part.strip() for part in relation.column.split("،")]
+            ]
+            parent_rows = {
+                relation.parent_row
+                for relation in column_relations
+                if relation.parent_row and relation.child_rows
+            }
+            excluded_parents = [
+                component
+                for component in data_components
+                if _row_from_source(component.source) in parent_rows
+            ]
+            probable_parent = any(
+                not relation.confirmed
+                for relation in column_relations
+                if relation.parent_row in parent_rows
+            )
+            data_components = [
+                component
+                for component in data_components
+                if _row_from_source(component.source) not in parent_rows
+            ]
 
             section_start = 0
             for subtotal_row in subtotal_rows:
@@ -1375,18 +1452,30 @@ class StatisticalReconciler:
                     )
                     section_start = subtotal_row
                     continue
+                section_rows = {
+                    _row_from_source(component.source) for component in section
+                }
+                section_excluded = [
+                    component
+                    for component in excluded_parents
+                    if section_start < _row_from_source(component.source) < subtotal_row
+                    and _row_from_source(component.source) not in section_rows
+                ]
+                result = reconcile_components(
+                    expected,
+                    section,
+                    kind=kind,
+                    tolerance=tolerance,
+                    unit=unit,
+                    label=label,
+                    measure=field.header or field.letter,
+                    sheet=grid.sheet_name,
+                    block=table.address,
+                    expected_source=expected_source,
+                )
                 results.append(
-                    reconcile_components(
-                        expected,
-                        section,
-                        kind=kind,
-                        tolerance=tolerance,
-                        unit=unit,
-                        label=label,
-                        measure=field.header or field.letter,
-                        sheet=grid.sheet_name,
-                        block=table.address,
-                        expected_source=expected_source,
+                    self._parent_note(
+                        result, section_excluded, probable=probable_parent
                     )
                 )
                 section_start = subtotal_row
@@ -1434,19 +1523,20 @@ class StatisticalReconciler:
                         )
                     )
                     continue
+                result = reconcile_components(
+                    expected,
+                    components,
+                    kind=kind,
+                    tolerance=tolerance,
+                    unit=unit,
+                    label=label,
+                    measure=field.header or field.letter,
+                    sheet=grid.sheet_name,
+                    block=table.address,
+                    expected_source=expected_source,
+                )
                 results.append(
-                    reconcile_components(
-                        expected,
-                        components,
-                        kind=kind,
-                        tolerance=tolerance,
-                        unit=unit,
-                        label=label,
-                        measure=field.header or field.letter,
-                        sheet=grid.sheet_name,
-                        block=table.address,
-                        expected_source=expected_source,
-                    )
+                    self._parent_note(result, excluded_parents, probable=probable_parent)
                 )
         return results
 

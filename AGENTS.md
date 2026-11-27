@@ -180,9 +180,10 @@ truncated.
   declared totals, cross-period comparison, serialization, clean/audit output profiles,
   warnings and the AI allow-list.
 - Known limits: automatic block reconciliation relies on declared total/subtotal rows
-  and the shared row classifier. A flat table that mixes a parent-category total with
-  its child rows, or overlapping administrative classifications without explicit tags,
-  cannot be proven safe from labels alone; use `reconcile_hierarchy` with
+  and the shared row classifier. Prompt 03B detects a probable parent-category row and
+  excludes it from the automatic component sum, downgrading a matching result to
+  `WARNING` for review. Overlapping administrative classifications without explicit
+  tags still cannot be proven safe from labels alone; use `reconcile_hierarchy` with
   `HierarchyNode` or `AggregationComponent.categories` for those structures.
   `compare_categories` is a deterministic API for aligned category maps; the engine does
   not infer category pairs from every layout. A ratio column without a detectable weight
@@ -257,6 +258,77 @@ differ; only identical ranges are comparable. Matching is pairwise and has no fi
 yet, so very large folders can be slow. `comparable=True` only permits a later comparison;
 it does not aggregate, and Prompt 02B reconciliation rules still apply.
 
+### Prompt 03B duplicate detection, derived sheets and safe aggregation
+
+- `excel/duplicate_control.py` — deterministic `Decimal`/hash engine that records
+  repeated content, copied summaries, formula-derived sheets, parent/child categories,
+  subtotal/grand-total rows and overlapping administrative groups before any cross-source
+  total. It never deletes, repairs or aggregates a value.
+- `BlockProfile` — per-block fingerprints (`table_hash`, `content_hash`, `summary_hash`),
+  trimmed row signatures, key/category values, record keys, summary rows, formula and
+  cross-sheet-reference counts and the block's primary period. Positional `ردیف`/`row`
+  columns are not record identifiers. A summary row enters the summary fingerprint only
+  when at least one measure cell has a value, so an empty formula total is not mistaken
+  for a copied summary.
+- `SheetRole` — `primary`, `summary`, `derived`, `duplicate`, `unknown`, each with
+  confidence and evidence. Formula evidence comes from whole-sheet formula scans
+  (`SheetIntelligence.formula_cells` / `cross_sheet_formula_cells`), so a small summary
+  sheet that never becomes a table is still classified. A sheet-name/title summary word
+  is a probable `summary` (0.55) only when no formula/duplicate evidence exists.
+- `DuplicateGroup` — exact content groups and summary-fingerprint groups are split by
+  reporting period, so two months with equal totals are not called duplicates. Near
+  duplicates require ≥75% header-token overlap and ≥80% row overlap. `safe_to_aggregate`
+  is always `False`.
+- `CategoryRelation` — `parent_of` (probable, `confirmed=False`), `grand_total_of`
+  (confirmed when the declared total equals the collapsed child rows) and `overlap`
+  (shared identifier/category values, only for period-compatible blocks). Nested parents
+  are collapsed before a grand total so a parent is never added to its children.
+- `AggregationDecision` — one decision per field pair with six explicit checks:
+  indicator equivalence, period compatibility, unit compatibility, category
+  relationship, source independence and non-overlapping coverage. `ALLOWED` requires all
+  six `PASS`; any `BLOCK` makes it `BLOCKED`; the rest is `REVIEW`. `comparable=False`
+  keeps coverage at `REVIEW`, and a pair inside one block is never independent.
+- `DuplicateControlReport` — sheets, blocks, groups, record duplicates, relations,
+  decisions, exclusions and warnings; `cross_source_status(metric, sources)` only
+  considers decisions whose two members come from different files. Serialized as
+  `AnalysisResult.duplicate_control` into the processed JSON.
+- `app/folder_workflow.py` — `FolderResult.duplicate_control` is built after semantic
+  matching. The folder report writes «کنترل تکرار و تجمیع بین فایل‌ها» and the
+  «مقایسه بین فایل‌ها» sheet suppresses «جمع فایل‌ها»/share with a status when the
+  contributors' cross-source status is not `ALLOWED`; a single contributing file is
+  always safe because nothing is added across files. «پاسخ درخواست» omits the share for
+  an unsafe cross-file sum but keeps the most/least comparison.
+- `report_writer.py` / `generic_report.py` — audit-only «کنترل تکرار و تجمیع» with sheet
+  roles, duplicate groups, record duplicates, relations, decisions and every exclusion;
+  the clean profile never writes it. The clean «اعتبارسنجی داده» shows a compact role /
+  decision summary, the duplicate-control warnings and up to 40 blocked/review decisions.
+- `structure_intelligence.py` — `formula_cells` and `cross_sheet_formula_cells` on every
+  `SheetIntelligence`, computed from the whole sheet even when no table is detected.
+- `statistical_reconciliation.py` — a probable/confirmed parent-category row recorded by
+  duplicate control is excluded from the automatic component sum, so a parent is never
+  added to its children. A matching result with a probable relation is `WARNING`, not
+  `PASS`, and its explanation names the excluded parent rows.
+- `tests/test_duplicate_control.py` (18 tests) uses real openpyxl workbooks and covers
+  exact duplicate tables in different worksheets, copied summaries across workbooks,
+  formula-based summary sheets, parent/child categories, subtotal and grand-total
+  duplication, overlapping administrative classifications, independent sources with the
+  same metric, similar-looking but independent datasets, a derived sheet without summary
+  labels, copied total rows with different detail, record-level duplicates (kept, not
+  removed), identical values in different periods, a mixed sheet with one duplicate and
+  one unique block (stays primary), a cross-sheet total formula in a data sheet (stays
+  primary), an unknown sheet, parent rows excluded from automatic reconciliation,
+  selected-file decision scope, serialization and the audit/clean output profiles.
+  `tests/test_output_quality.py` guards the audit-only sheet.
+- Known limits: duplicate/overlap detection is fingerprint- and period-based; a real
+  duplicate whose values were edited slightly is `REVIEW`, not proof. Without cached
+  formula values (a file never opened by Excel) a total row has no fingerprint, so it is
+  not grouped. A formula-derived sheet is recognised when cross-sheet formulas cover at
+  least half of its data rows; a data sheet with only a total formula stays primary.
+  Formula references are matched by sheet name; external-workbook links are not followed. Row-number columns are excluded from identifiers, so a table with no real
+  key gets `REVIEW` coverage rather than a guessed overlap. The folder comparison refuses
+  a cross-file total only when its decision is not `ALLOWED`; it does not rewrite any
+  per-file figure.
+
 ### Instructions for the next AI agent
 
 1. Fetch the repository and start from the branch that contains the latest accepted
@@ -270,10 +342,11 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
 5. Prompt 01A (**Data Model, Workbook Structure, and Metadata Extraction**), Prompt 01B
    (**Multi-Block Extraction, Table Boundaries, and Total Detection**), Prompt 02A
    (**Semantic Classification and Data Quality Validation**), Prompt 02B
-   (**Statistical Reconciliation and Calculation Integrity**) and Prompt 03A
-   (**Semantic Source Matching and Period Alignment**) are implemented. Do not repeat
-   them or substitute audit Phase 1a for them. The next engineering action starts only
-   after the owner accepts the latest prompt.
+   (**Statistical Reconciliation and Calculation Integrity**), Prompt 03A
+   (**Semantic Source Matching and Period Alignment**) and Prompt 03B
+   (**Duplicate Detection, Derived Sheets, and Safe Aggregation**) are implemented. Do
+   not repeat them or substitute audit Phase 1a for them. The next engineering action
+   starts only after the owner accepts the latest prompt.
 6. Follow the supplied shared execution contract: one dedicated branch per stage,
    focused tests, actual evidence, no merge/push to `main`, no rewrite of project
    architecture, Python as the numeric source of truth, and Qwen for narrative only.

@@ -33,6 +33,7 @@ from local_office_ai.excel.anomaly_detection import AnomalyDetector
 from local_office_ai.excel.calculations import FinancialCalculator
 from local_office_ai.excel.data_extractor import DataExtractor
 from local_office_ai.excel.data_quality import DataQualityAnalyzer
+from local_office_ai.excel.duplicate_control import DuplicateControlAnalyzer
 from local_office_ai.excel.statistical_reconciliation import StatisticalReconciler
 from local_office_ai.excel.extraction_model import ExtractionModelBuilder
 from local_office_ai.excel.reader import WorkbookReader
@@ -353,6 +354,9 @@ class ExcelIntelligenceWorkflow:
             structures=sheet_structures,
             intelligence=analysis.intelligence,
         )
+        # Repeated content, copied summaries, formula-derived sheets and
+        # overlapping categories are recorded before any cross-source total.
+        analysis.duplicate_control = DuplicateControlAnalyzer(self.settings).analyze(analysis)
         for warning in analysis.intelligence.warnings:
             analysis.warnings.append(warning)
 

@@ -343,6 +343,8 @@ class SheetIntelligence:
     year_pairs: list[dict[str, Any]] = field(default_factory=list)
     derived: bool = False
     referenced_sheets: list[str] = field(default_factory=list)
+    formula_cells: int = 0
+    cross_sheet_formula_cells: int = 0
     column_totals: list[dict[str, Any]] = field(default_factory=list)
     column_references: dict[str, list[str]] = field(default_factory=dict)
     row_roles: list[dict[str, Any]] = field(default_factory=list)
@@ -404,6 +406,8 @@ class SheetIntelligence:
             "year_pairs": list(self.year_pairs),
             "derived": self.derived,
             "referenced_sheets": list(self.referenced_sheets),
+            "formula_cells": self.formula_cells,
+            "cross_sheet_formula_cells": self.cross_sheet_formula_cells,
             "column_totals": _jsonable(self.column_totals),
             "column_references": {key: list(value) for key, value in self.column_references.items()},
             "row_roles": list(self.row_roles),
@@ -484,6 +488,10 @@ class StructureIntelligenceAnalyzer:
             state=getattr(sheet_meta, "state", "visible") or "visible",
             generic=generic,
         )
+        intel.formula_cells, intel.cross_sheet_formula_cells, references = self._formula_stats(
+            grid, known_sheets or {grid.sheet_name}
+        )
+        intel.referenced_sheets = list(references)
         if primary is None:
             intel.status = STATUS_NONE
             intel.warnings.append("هیچ جدول داده‌ای در این برگه شناسایی نشد.")
@@ -528,9 +536,12 @@ class StructureIntelligenceAnalyzer:
                 )
 
         intel.row_roles, intel.summary_rows = self._row_roles(grid, primary, tables)
-        intel.derived, intel.referenced_sheets = self._references(
+        intel.derived, referenced = self._references(
             grid, primary, known_sheets or {grid.sheet_name}
         )
+        for name in referenced:
+            if name not in intel.referenced_sheets:
+                intel.referenced_sheets.append(name)
         intel.column_totals, intel.column_references = self._column_totals(
             grid, primary, intel, known_sheets or {grid.sheet_name}
         )
@@ -1259,6 +1270,38 @@ class StructureIntelligenceAnalyzer:
         return results
 
     # ------------------------------------------------------------------ #
+    def _formula_stats(
+        self, grid: SheetGrid, known_sheets: set[str]
+    ) -> tuple[int, int, list[str]]:
+        """Count formulas and cross-sheet references on the whole sheet.
+
+        A summary sheet that only holds a few total cells may not become a
+        table candidate, so this scan cannot depend on a detected table.
+        """
+        formulas = 0
+        cross_sheet = 0
+        references: list[str] = []
+        for cell in grid.cells.values():
+            formula = cell.formula
+            if not isinstance(formula, str) or not formula.startswith("="):
+                continue
+            formulas += 1
+            external = {
+                (match.group(1) or match.group(2) or "").strip()
+                for match in _SHEET_REF.finditer(formula)
+            }
+            external = {
+                name
+                for name in external
+                if name in known_sheets and name != grid.sheet_name
+            }
+            if external:
+                cross_sheet += 1
+                for name in sorted(external):
+                    if name not in references:
+                        references.append(name)
+        return formulas, cross_sheet, references
+
     def _references(
         self,
         grid: SheetGrid,

@@ -25,6 +25,11 @@ from local_office_ai.core.exceptions import EngineError
 from local_office_ai.core.logging_config import get_logger
 from local_office_ai.core.models import to_excel_number
 from local_office_ai.core.settings import Settings
+from local_office_ai.excel.duplicate_control import (
+    AGGREGATION_STATUS_FA,
+    AggregationStatus,
+    DuplicateControlAnalyzer,
+)
 from local_office_ai.excel.period_integration import PeriodIntegration
 from local_office_ai.excel.report_writer import ExcelReportWriter
 from local_office_ai.excel.semantic_matching import match_across_sources
@@ -88,6 +93,7 @@ class FolderResult:
     metrics: list[str] = field(default_factory=list)
     period: str = ""
     matching: Any = None
+    duplicate_control: Any = None
     warnings: list[str] = field(default_factory=list)
     status: str = "completed"
 
@@ -102,6 +108,11 @@ class FolderResult:
                 self.matching.to_dict()
                 if hasattr(self.matching, "to_dict")
                 else self.matching
+            ),
+            "duplicate_control": (
+                self.duplicate_control.to_dict()
+                if hasattr(self.duplicate_control, "to_dict")
+                else self.duplicate_control
             ),
             "files": [item.to_dict() for item in self.files],
             "warnings": list(self.warnings),
@@ -200,6 +211,14 @@ class FolderWorkflow:
                 for item in result.files
                 if item.analysis is not None
             ],
+        )
+        result.duplicate_control = DuplicateControlAnalyzer(self.settings).analyze_sources(
+            [
+                (item.name, item.analysis)
+                for item in result.files
+                if item.analysis is not None
+            ],
+            matching=result.matching,
         )
 
         output_path = Path(output) if output else self._default_output(source)
@@ -331,6 +350,7 @@ class FolderReportWriter(ExcelReportWriter):
         if merged is not None:
             self._file_comparison(workbook, result, merged)
         self._cross_source_matching(workbook, result)
+        self._duplicate_control(workbook, result)
         self._folder_issues(workbook, result)
         workbook.properties.title = "Local Office AI - تحلیل پوشه"
         workbook.properties.creator = "Local Office AI Engine"
@@ -443,6 +463,18 @@ class FolderReportWriter(ExcelReportWriter):
                 continue
             top = max(totals, key=lambda key: totals[key])
             low = min(totals, key=lambda key: totals[key])
+            report = result.duplicate_control
+            status = (
+                report.cross_source_status(series.metric, totals)
+                if report is not None and len(totals) > 1
+                else None
+            )
+            if len(totals) > 1 and status is not AggregationStatus.ALLOWED:
+                return (
+                    f"شاخص «{series.metric}» در دوره {period}: فایل «{top}» با {totals[top]:,.0f} "
+                    f"بیشترین و فایل «{low}» با {totals[low]:,.0f} کمترین مقدار را دارد؛ "
+                    "جمع بین فایل‌ها به دلیل احتمال شمارش دوباره ارائه نشد."
+                )
             total = sum(totals.values(), Decimal(0))
             if not total:
                 continue
@@ -491,9 +523,14 @@ class FolderReportWriter(ExcelReportWriter):
         row = 3
         self._section(ws, row, f"جمع ماه‌های کامل دوره {period} به تفکیک فایل", 8 + len(files))
         row += 1
-        self._header(ws, row, ["شاخص"] + files + ["جمع فایل‌ها", "سهم بزرگ‌ترین فایل"])
+        self._header(
+            ws,
+            row,
+            ["شاخص"] + files + ["جمع فایل‌ها", "سهم بزرگ‌ترین فایل", "وضعیت تجمیع"],
+        )
         header_row = row
         row += 1
+        report = result.duplicate_control
         for series in merged.series:
             totals: dict[str, Any] = {}
             for cell in series.cells:
@@ -508,15 +545,40 @@ class FolderReportWriter(ExcelReportWriter):
                 value = totals.get(name)
                 cell = ws.cell(row, offset, to_excel_number(value))
                 cell.number_format = COUNT_FORMAT
-            total = sum(totals.values())
-            self._value_cell(ws, row, 2 + len(files), total)
-            top = max(totals.values())
-            share = (top / total * 100) if total else None
-            share_cell = ws.cell(row, 3 + len(files), to_excel_number(share))
-            share_cell.number_format = PERCENT_FORMAT
+            contributors = [name for name in files if totals.get(name) is not None]
+            status = (
+                report.cross_source_status(series.metric, contributors)
+                if report is not None and len(contributors) > 1
+                else None
+            )
+            safe = len(contributors) <= 1 or status is AggregationStatus.ALLOWED
+            if safe:
+                total = sum(totals.values())
+                self._value_cell(ws, row, 2 + len(files), total)
+                top = max(totals.values())
+                share = (top / total * 100) if total else None
+                share_cell = ws.cell(row, 3 + len(files), to_excel_number(share))
+                share_cell.number_format = PERCENT_FORMAT
+            else:
+                self._value_cell(ws, row, 2 + len(files), "—")
+                self._value_cell(ws, row, 3 + len(files), "—")
+            status_cell = ws.cell(row, 4 + len(files))
+            if safe:
+                status_cell.value = "مجاز" if len(contributors) > 1 else "یک منبع"
+                self._fill(status_cell, GREEN)
+            else:
+                status_cell.value = (
+                    AGGREGATION_STATUS_FA.get(status, "نیازمند بررسی")
+                    if status is not None
+                    else "نیازمند بررسی"
+                )
+                self._fill(
+                    status_cell,
+                    RED if status is AggregationStatus.BLOCKED else YELLOW,
+                )
             row += 1
-        self._body(ws, header_row + 1, max(header_row + 1, row - 1), 1, 3 + len(files))
-        self._widths(ws, {"A": 46, **{get_column_letter(index): 20 for index in range(2, 4 + len(files))}})
+        self._body(ws, header_row + 1, max(header_row + 1, row - 1), 1, 4 + len(files))
+        self._widths(ws, {"A": 46, **{get_column_letter(index): 20 for index in range(2, 5 + len(files))}})
         ws.freeze_panes = "B5"
         self._print_setup(ws)
 
@@ -722,4 +784,185 @@ class FolderReportWriter(ExcelReportWriter):
             row += 1
         self._body(ws, 4, row - 1, 1, 5)
         self._widths(ws, {"A": 40, "B": 12, "C": 24, "D": 90, "E": 24})
+        self._print_setup(ws)
+
+    def _duplicate_control(self, wb: Workbook, result: FolderResult) -> None:
+        """Record duplicates, derived sheets and blocked aggregation across files."""
+        from local_office_ai.excel.duplicate_control import (
+            AGGREGATION_STATUS_FA,
+            CHECK_STATUS_FA,
+            SHEET_ROLE_FA,
+        )
+
+        report = result.duplicate_control
+        if report is None:
+            return
+        ws = wb.create_sheet("کنترل تکرار و تجمیع بین فایل‌ها")
+        self._rtl(ws)
+        self._title(ws, "کنترل تکرار، برگه مشتق و تجمیع ایمن بین فایل‌های پوشه", 10)
+        row = 3
+        counts = report.counts()
+        roles = report.role_counts()
+        self._value_cell(ws, row, 1, "خلاصه")
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+        self._value_cell(
+            ws,
+            row,
+            2,
+            f"فایل {counts['sources']} — برگه {counts['sheets']} — گروه محتوای تکراری "
+            f"{counts['duplicate_groups']} — رکورد تکراری {counts['record_duplicates']} — "
+            f"تصمیم تجمیع: مجاز {counts['allowed']} / نیازمند بررسی {counts['review']} / "
+            f"مسدود {counts['blocked']} — کنارگذاشته {counts['exclusions']}",
+        )
+        row += 1
+        self._value_cell(ws, row, 1, "طبقه‌بندی برگه‌ها")
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+        self._value_cell(
+            ws,
+            row,
+            2,
+            f"داده اولیه {roles.get('primary', 0)} / خلاصه {roles.get('summary', 0)} / "
+            f"مشتق {roles.get('derived', 0)} / تکراری {roles.get('duplicate', 0)} / "
+            f"نامشخص {roles.get('unknown', 0)}",
+        )
+        row += 1
+        self._value_cell(ws, row, 1, "اصل کار")
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+        self._value_cell(
+            ws,
+            row,
+            2,
+            "هیچ رکورد یا فایلی حذف یا اصلاح نشد. جمع بین فایل‌ها فقط با تأیید شش شرط "
+            "(هم‌ارزی شاخص، دوره، واحد، رابطه دسته، استقلال منبع و جدا بودن پوشش) مجاز است؛ "
+            "موارد مبهم برای بررسی علامت خورده‌اند.",
+        )
+        row += 2
+        if report.warnings:
+            self._section(ws, row, "هشدارها", 9)
+            row += 1
+            for warning in report.warnings:
+                ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=9)
+                self._value_cell(ws, row, 1, "• " + warning)
+                self._fill(ws.cell(row, 1), YELLOW)
+                row += 1
+            row += 1
+
+        if report.sheets:
+            self._section(ws, row, "نقش برگه‌ها و شاهد طبقه‌بندی", 9)
+            row += 1
+            self._header(ws, row, ["فایل", "برگه", "نقش", "اطمینان", "فرمول/ارجاع", "تکراری از", "شاهد", "", ""])
+            header_row = row
+            row += 1
+            colors = {"primary": GREEN, "summary": YELLOW, "derived": YELLOW, "duplicate": RED}
+            for sheet in report.sheets:
+                values = [
+                    sheet.source,
+                    sheet.sheet,
+                    SHEET_ROLE_FA.get(sheet.role, sheet.role.value),
+                    f"{sheet.confidence:.0%}",
+                    f"{sheet.formula_cells}/{sheet.cross_sheet_formula_cells}",
+                    "، ".join(sheet.duplicate_of) or "—",
+                    "؛ ".join(sheet.evidence) or "—",
+                    "",
+                    "",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                self._fill(ws.cell(row, 3), colors.get(sheet.role.value, GREY))
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 7)
+            row += 1
+
+        if report.duplicate_groups:
+            self._section(ws, row, "گروه‌های محتوای تکراری (جمع آن‌ها مسدود است)", 9)
+            row += 1
+            self._header(ws, row, ["گروه", "نوع", "اعضا", "دلیل", "شاهد", "", "", "", ""])
+            header_row = row
+            row += 1
+            for group in report.duplicate_groups:
+                values = [
+                    group.group_id,
+                    "جمع تکراری" if group.kind == "summary" else "جدول تکراری",
+                    "؛ ".join(member.label for member in group.members),
+                    group.reason,
+                    "؛ ".join(group.evidence),
+                    "",
+                    "",
+                    "",
+                    "",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                self._fill(ws.cell(row, 2), RED if group.identical else YELLOW)
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 5)
+            row += 1
+
+        if report.decisions:
+            self._section(ws, row, "تصمیم‌های تجمیع ایمن بین منابع", 12)
+            row += 1
+            self._header(ws, row, [
+                "شناسه", "شاخص", "اعضا", "نتیجه", "شاخص", "دوره", "واحد",
+                "دسته", "استقلال", "پوشش", "دلیل", "شاهد",
+            ])
+            header_row = row
+            row += 1
+            decision_colors = {"allowed": GREEN, "review": YELLOW, "blocked": RED}
+            for decision in report.decisions[:200]:
+                checks = {check.name: check for check in decision.checks}
+                values = [
+                    decision.decision_id,
+                    decision.metric,
+                    "؛ ".join(decision.members),
+                    AGGREGATION_STATUS_FA.get(decision.status, decision.status.value),
+                    CHECK_STATUS_FA.get(checks["indicator_equivalence"].status, "—"),
+                    CHECK_STATUS_FA.get(checks["period_compatibility"].status, "—"),
+                    CHECK_STATUS_FA.get(checks["unit_compatibility"].status, "—"),
+                    CHECK_STATUS_FA.get(checks["category_relationship"].status, "—"),
+                    CHECK_STATUS_FA.get(checks["source_independence"].status, "—"),
+                    CHECK_STATUS_FA.get(checks["coverage_non_overlap"].status, "—"),
+                    "؛ ".join(decision.reasons) or "—",
+                    "؛ ".join(decision.evidence) or "—",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                self._fill(ws.cell(row, 4), decision_colors.get(decision.status.value, GREY))
+                row += 1
+            if len(report.decisions) > 200:
+                self._value_cell(ws, row, 1, f"… و {len(report.decisions) - 200} تصمیم دیگر")
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 12)
+            row += 1
+
+        if report.exclusions:
+            self._section(ws, row, "کنارگذاشته‌ها و دلیل آن‌ها", 9)
+            row += 1
+            self._header(ws, row, ["نوع", "فایل", "برگه", "محل", "دلیل", "شاهد", "", "", ""])
+            header_row = row
+            row += 1
+            for item in report.exclusions[:300]:
+                values = [
+                    item.kind,
+                    item.source,
+                    item.sheet,
+                    item.address or "—",
+                    item.reason,
+                    "؛ ".join(item.evidence) or "—",
+                    "",
+                    "",
+                    "",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                row += 1
+            if len(report.exclusions) > 300:
+                self._value_cell(ws, row, 1, f"… و {len(report.exclusions) - 300} مورد دیگر")
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 6)
+
+        self._widths(ws, {
+            "A": 20, "B": 28, "C": 40, "D": 14, "E": 16, "F": 16,
+            "G": 16, "H": 14, "I": 14, "J": 14, "K": 60, "L": 60,
+        })
+        ws.freeze_panes = "A5"
         self._print_setup(ws)
