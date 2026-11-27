@@ -463,7 +463,7 @@ def identifier_evidence(
     numeric_texts = any(_DIGIT_ONLY.fullmatch(normalize_digits(text).strip()) for text in texts)
     if strong:
         evidence.append(f"عنوان «{header}» واژه شناسه دارد")
-    elif weak and (values or numeric_texts):
+    elif weak and not measure and (values or numeric_texts):
         evidence.append(f"عنوان «{header}» واژه کلید دارد و مقادیر آن عددی/کدی است")
     evidence.extend(
         identifier_value_evidence(values, texts, header_has_measure=measure)

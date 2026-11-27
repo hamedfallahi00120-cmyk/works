@@ -27,6 +27,7 @@ from local_office_ai.core.models import to_excel_number
 from local_office_ai.core.settings import Settings
 from local_office_ai.excel.period_integration import PeriodIntegration
 from local_office_ai.excel.report_writer import ExcelReportWriter
+from local_office_ai.excel.semantic_matching import match_across_sources
 
 LOGGER = get_logger(__name__)
 
@@ -86,6 +87,7 @@ class FolderResult:
     files: list[FileOutcome] = field(default_factory=list)
     metrics: list[str] = field(default_factory=list)
     period: str = ""
+    matching: Any = None
     warnings: list[str] = field(default_factory=list)
     status: str = "completed"
 
@@ -96,6 +98,11 @@ class FolderResult:
             "output_path": self.output_path,
             "period": self.period,
             "metrics": list(self.metrics),
+            "matching": (
+                self.matching.to_dict()
+                if hasattr(self.matching, "to_dict")
+                else self.matching
+            ),
             "files": [item.to_dict() for item in self.files],
             "warnings": list(self.warnings),
             "status": self.status,
@@ -186,6 +193,14 @@ class FolderWorkflow:
         merged = self._merge(usable)
         result.metrics = merged.metric_names if merged is not None else []
         result.period = merged.main_period() if merged is not None else ""
+        result.matching = match_across_sources(
+            self.settings,
+            [
+                (item.name, item.analysis)
+                for item in result.files
+                if item.analysis is not None
+            ],
+        )
 
         output_path = Path(output) if output else self._default_output(source)
         writer = FolderReportWriter(self.settings)
@@ -315,6 +330,7 @@ class FolderReportWriter(ExcelReportWriter):
         self._file_list(workbook, result)
         if merged is not None:
             self._file_comparison(workbook, result, merged)
+        self._cross_source_matching(workbook, result)
         self._folder_issues(workbook, result)
         workbook.properties.title = "Local Office AI - تحلیل پوشه"
         workbook.properties.creator = "Local Office AI Engine"
@@ -354,6 +370,7 @@ class FolderReportWriter(ExcelReportWriter):
             ("فایل‌های تحلیل‌شده", analyzed),
             ("فایل‌های ناموفق", failed),
             ("تعداد شاخص مشترک", len(result.metrics)),
+            ("تطبیق معنایی بین منابع", self._matching_summary(result)),
             ("دوره تحلیل", result.period or "—"),
             ("وضعیت", "کامل" if failed == 0 else "با هشدار"),
             ("درخواست کاربر", result.request or "—"),
@@ -374,6 +391,18 @@ class FolderReportWriter(ExcelReportWriter):
                 ws.cell(row, 1, "• " + warning).alignment = Alignment(horizontal="right", wrap_text=True)
         self._widths(ws, {"A": 34, "B": 90, "C": 24, "D": 24})
         self._print_setup(ws)
+
+    @staticmethod
+    def _matching_summary(result: FolderResult) -> str:
+        report = result.matching
+        if report is None:
+            return "—"
+        counts = report.counts()
+        return (
+            f"فیلد {counts.get('fields', 0)} — تطبیق قطعی {counts.get('matched', 0)} — "
+            f"احتمالی {counts.get('probable', 0)} — مبهم {counts.get('ambiguous', 0)} — "
+            f"رد‌شده {counts.get('rejected', 0)}"
+        )
 
     @staticmethod
     def _request_reading(result: FolderResult) -> str:
@@ -489,6 +518,178 @@ class FolderReportWriter(ExcelReportWriter):
         self._body(ws, header_row + 1, max(header_row + 1, row - 1), 1, 3 + len(files))
         self._widths(ws, {"A": 46, **{get_column_letter(index): 20 for index in range(2, 4 + len(files))}})
         ws.freeze_panes = "B5"
+        self._print_setup(ws)
+
+    def _cross_source_matching(self, wb: Workbook, result: FolderResult) -> None:
+        """Explain which fields of which files were matched, and why not."""
+        from local_office_ai.excel.semantic_matching import (
+            PERIOD_STATUS_FA,
+            RELATION_FA,
+            STATUS_FA,
+            UNIT_STATE_FA,
+        )
+
+        report = result.matching
+        if report is None:
+            return
+        counts = report.counts()
+        if not any(
+            counts.get(key, 0)
+            for key in ("matched", "probable", "ambiguous", "rejected")
+        ):
+            return
+
+        ws = wb.create_sheet("تطبیق شاخص‌ها بین منابع")
+        self._rtl(ws)
+        self._title(ws, "تطبیق معنایی شاخص‌ها بین فایل‌های پوشه: شاهد و دلیل تصمیم", 10)
+        row = 3
+        self._value_cell(ws, row, 1, "خلاصه تصمیم‌ها")
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+        self._value_cell(ws, row, 2, self._matching_summary(result))
+        row += 1
+        self._value_cell(ws, row, 1, "اصل کار")
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+        self._value_cell(
+            ws,
+            row,
+            2,
+            "تطبیق فقط با شاهد نام نرمال‌شده، نقش معنایی، واحد و دوره گزارش‌دهی انجام شده است؛ "
+            "این برگه هیچ مقداری را بین فایل‌ها جمع نمی‌کند.",
+        )
+        row += 2
+        if report.warnings:
+            self._section(ws, row, "هشدارهای تطبیق", 9)
+            row += 1
+            for warning in report.warnings:
+                self._value_cell(ws, row, 1, "هشدار")
+                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+                self._value_cell(ws, row, 2, warning)
+                self._fill(ws.cell(row, 1), YELLOW)
+                row += 1
+            row += 1
+
+        colors = {"matched": GREEN, "probable": YELLOW, "ambiguous": YELLOW, "rejected": RED}
+
+        def section(title: str, items: list[Any]) -> None:
+            nonlocal row
+            if not items:
+                return
+            self._section(ws, row, title, 10)
+            row += 1
+            self._header(ws, row, [
+                "وضعیت", "نوع", "برچسب اصلی ← نرمال‌شده", "منبع/برگه/بلوک/عنوان",
+                "رابطه دوره", "واحد", "قابل مقایسه", "اطمینان", "شاهد/دلیل", "توضیح دوره",
+            ])
+            header_row = row
+            row += 1
+            for item in items:
+                members = "؛ ".join(member.display_label for member in item.members)
+                original_labels = " / ".join(
+                    dict.fromkeys(member.header for member in item.members)
+                )
+                display_label = (
+                    f"{original_labels} ← {item.normalized_label}"
+                    if item.normalized_label
+                    else original_labels
+                )
+                values = [
+                    STATUS_FA.get(item.status, item.status.value),
+                    item.kind_label,
+                    display_label or "—",
+                    members,
+                    f"{RELATION_FA.get(item.period_relation, item.period_relation or '—')} / "
+                    f"{PERIOD_STATUS_FA.get(item.period_status, item.period_status or '—')}",
+                    UNIT_STATE_FA.get(item.unit_state, item.unit_state or "—"),
+                    "بله" if item.comparable else "خیر",
+                    f"{item.confidence:.0%}",
+                    (
+                        "؛ ".join(item.evidence)
+                        + (f" — {item.reason}" if item.reason else "")
+                    )
+                    or "—",
+                    item.period_explanation or "—",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                self._fill(ws.cell(row, 1), colors.get(item.status.value, GREY))
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 10)
+            row += 1
+
+        section("تطبیق قطعی بین فایل‌ها", report.matches)
+        section("تطبیق احتمالی (برابری کامل اثبات نشد)", report.probable)
+
+        if report.ambiguities:
+            self._section(ws, row, "موارد مبهم: گزینه‌ها نگه داشته شده‌اند", 9)
+            row += 1
+            self._header(ws, row, [
+                "فیلد مبنا", "منبع/برگه", "تعداد گزینه", "گزینه‌ها (منبع/برگه/عنوان)",
+                "وضعیت گزینه", "امتیاز", "دلیل", "شاهد", "وضعیت دوره",
+            ])
+            header_row = row
+            row += 1
+            for item in report.ambiguities:
+                anchor = item.members[0]
+                candidates = "؛ ".join(
+                    f"{candidate.field.source}/{candidate.field.sheet}/«{candidate.field.header}»"
+                    f" ({candidate.score:.0%})"
+                    for candidate in item.candidates
+                )
+                values = [
+                    anchor.header,
+                    f"{anchor.source}/{anchor.sheet}",
+                    len(item.candidates),
+                    candidates or "—",
+                    "؛ ".join(
+                        STATUS_FA.get(candidate.status, candidate.status.value)
+                        for candidate in item.candidates
+                    ) or "—",
+                    f"{item.confidence:.0%}",
+                    item.reason,
+                    "؛ ".join(
+                        text for candidate in item.candidates for text in candidate.evidence
+                    ) or "—",
+                    PERIOD_STATUS_FA.get(item.period_status, item.period_status or "—"),
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                self._fill(ws.cell(row, 1), YELLOW)
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 9)
+            row += 1
+
+        if report.rejections:
+            self._section(ws, row, "موارد رد‌شده: چرا دو فیلد هم‌معنا نیستند", 9)
+            row += 1
+            self._header(ws, row, [
+                "فیلد اول", "منبع/برگه اول", "فیلد دوم", "منبع/برگه دوم",
+                "دلیل رد", "امتیاز برچسب", "رابطه دوره", "واحد", "وضعیت دوره",
+            ])
+            header_row = row
+            row += 1
+            for item in report.rejections:
+                values = [
+                    item.left.header,
+                    f"{item.left.source}/{item.left.sheet}",
+                    item.right.header,
+                    f"{item.right.source}/{item.right.sheet}",
+                    item.reason,
+                    f"{item.label_score:.0%}",
+                    RELATION_FA.get(item.period_relation, item.period_relation or "—"),
+                    UNIT_STATE_FA.get(item.unit_state, item.unit_state or "—"),
+                    PERIOD_STATUS_FA.get(item.period_status, item.period_status or "—"),
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                self._fill(ws.cell(row, 1), RED)
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 9)
+
+        self._widths(ws, {
+            "A": 22, "B": 20, "C": 26, "D": 48, "E": 16,
+            "F": 14, "G": 16, "H": 11, "I": 62, "J": 48,
+        })
+        ws.freeze_panes = "A5"
         self._print_setup(ws)
 
     def _folder_issues(self, wb: Workbook, result: FolderResult) -> None:

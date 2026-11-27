@@ -2,11 +2,13 @@
 
 This ledger records the verified handoff state for the next engineering stage.
 The preparation baseline was Phase-1a preparation only. **Prompt 01A (Data Model, Workbook
-Structure, and Metadata Extraction) is implemented and merged to `main` as PR #4**, and
-its evidence is recorded at the end of this file. Prompt 01B (Multi-Block Extraction,
-Table Boundaries, and Total Detection) is implemented on
-`feature/prompt-01b-multiblock-extraction`; its evidence is recorded at the end of this
-file.
+Structure, and Metadata Extraction) is implemented and merged to `main` as PR #4.**
+Prompt 01B (Multi-Block Extraction, Table Boundaries, and Total Detection) is merged as
+PR #5, Prompt 02A (Semantic Classification and Data Quality Validation) as PR #6 and
+Prompt 02B (Statistical Reconciliation and Calculation Integrity) as PR #7. **Prompt 03A
+(Semantic Source Matching and Period Alignment) is implemented on
+`feature/prompt-03a-semantic-source-matching`.** Evidence for each stage is recorded at
+the end of this file.
 
 ## Verified repository state
 
@@ -15,12 +17,18 @@ file.
 | Repository | `hamedfallahi00120-cmyk/works` (private) |
 | Phase-0 base | `main` at `6df625659c97c0b7da1f78f33fa5fc37864a7580` |
 | Prompt 01A merge | PR #4; `main` at `f572c47` |
+| Prompt 01B merge | PR #5; `main` at `113cc1f` |
+| Prompt 02A merge | PR #6; `main` at `d173465` |
+| Prompt 02B merge | PR #7; `main` at `891b662` |
 | Preparation branch | `fix/multisource-extraction-integrity` |
 | Preparation commits | `5b20cce` (tests + ledger), `06dae62` (sanitized handover + audit), followed by CI/documentation-preflight commits |
 | Phase 0 | Completed; see `PHASE0_BASELINE_AUDIT.md` |
-| Original Prompt 01A | Implemented and merged as PR #4 (evidence at end) |
-| Prompt 01B | Implemented on `feature/prompt-01b-multiblock-extraction` (evidence at end) |
-| Production source fixes in the preparation baseline | None; Prompt 01A and Prompt 01B add production source changes (below) |
+| Prompt 01A | Implemented and merged as PR #4 (evidence at end) |
+| Prompt 01B | Implemented and merged as PR #5 (evidence at end) |
+| Prompt 02A | Implemented and merged as PR #6 (evidence at end) |
+| Prompt 02B | Implemented and merged as PR #7 (evidence at end) |
+| Prompt 03A | Implemented on `feature/prompt-03a-semantic-source-matching`; PR #8 open (evidence at end) |
+| Production source fixes in the preparation baseline | None; Prompts 01A, 01B, 02A, 02B and 03A add production source changes (below) |
 
 ## Evidence labels
 
@@ -413,3 +421,116 @@ absent and they are not counted as passing. The two skips are the PySide6 GUI te
 - A ratio column with no weight column, or with more than one plausible weight column,
   is reported as `WARNING` with no average; the engine does not pick a denominator by
   position.
+
+## Prompt 03A — Semantic Source Matching and Period Alignment
+
+Status: implemented on `feature/prompt-03a-semantic-source-matching`; branch pushed and
+PR #8 open, not merged to `main`. Base: `main` at `891b662` (PR #7 merged).
+
+### What was added
+
+- `excel/period_alignment.py` (new): `NormalizedPeriod` and `parse_period` /
+  `parse_periods`. It recognizes Jalali and Gregorian years, months, days, numeric
+  dates (`1403/04`, `1403/04/15`, `2024-07-05`), named months (`تیر 1403`,
+  `July 2024`), consecutive multi-month periods (`مرداد و شهریور 1403`,
+  `January and February 2024`), quarters, halves, seasons, explicit ranges
+  (`از ... تا`, `..`, ` - `), compact ranges (`1403/01/01-1403/03/31`,
+  `1403-1404`) and embedded dates in headers (`تعداد پرونده 1403/04`).
+  Persian/Arabic-Indic digits are normalized first. A month name paired with a year
+  from the other calendar (`تیر 2024`, `July 1403`) is not a period. An exact bare
+  year is accepted inside the converter band (1178–1633 Jalali, 1700–2200
+  Gregorian); a bare year embedded in a short title is limited to 1300–1500 Jalali /
+  1900–2100 Gregorian. A long free-text cell and a code such as `کد 1234` are not
+  periods; `ردیف 12` is not a period. A code number next to a real year is ignored,
+  and multiple plausible years yield no period. A multi-month phrase without an
+  ordinal (`سه ماهه 1403`) or several non-consecutive month names (`مرداد و مهر
+  1403`) yields no period, never a bare year. The matcher consumes the finalized `SheetIntelligence.periods`, so a month
+  block title under a year-only sheet name becomes `مرداد 1404`; if only a bare year
+  remains for a month title, the period is `not_detected` rather than equated with
+  another month or invented. `compare_period_sets` returns an explained relationship
+  (`equivalent`, `contains`, `within`, `overlapping`, `incompatible`, `unknown`)
+  with the real overlap dates.
+- `excel/semantic_matching.py` (new): controlled cross-source matching. Every
+  `SourceField` keeps source file, sheet, block, column letter, original header,
+  normalized label, canonical tokens, role, unit (dimension/canonical/scale), periods,
+  table title, row labels, samples, shared identifier columns and identifier values,
+  and evidence. Label evidence uses canonical tokens (spelling, ZWNJ, Persian plural
+  forms, a small cross-language administrative vocabulary, configured synonyms) and
+  separates content words from measure words, so `تعداد پرونده` matches `Case Count`
+  but `تعداد پرونده ورودی` is not `تعداد پرونده خروجی`. Aggregation words are
+  identity-bearing: `مبلغ` is not matched to `مبلغ کل` or `میانگین مبلغ`. Units are
+  compared by dimension and scale; `ریال` versus `نفر` is rejected, `میلیون ریال`
+  versus `ریال` is the same indicator but not directly comparable. Periods are
+  compared as date ranges, never as strings. Row-label overlap, shared identifier
+  values and table-title similarity are recorded as supporting evidence, so a
+  reordered table with an extra descriptive column can still align on the same rows.
+- Identity and value comparability are separate: a field pair is `matched` when the
+  normalized label, role and unit identity agree; `comparable` is true only when units
+  are equal (or both absent) and periods are equivalent. Every field and decision also
+  carries an explicit period status (`detected`, `not_detected`, `conflicting` or
+  `partial`), so an absent period is reported rather than invented. The same indicator in two
+  different periods stays mapped with `comparable=False`; a missing period yields
+  `probable`, not `matched`. Two or more plausible candidates produce one `ambiguous`
+  record that keeps every candidate. A category or identifier pair whose names differ
+  but whose sampled values overlap at least 80% is `probable` with `comparable=False`,
+  never a definitive match. Similar names that describe different indicators are
+  `rejected` with the reason. The engine never aggregates.
+- `semantic_classification.py`: `SemanticField` now carries the column period and
+  sample values; `SemanticBlock` carries row labels taken from the primary
+  identifier/category column (descriptive columns such as `شرح` are skipped).
+  `semantic_vocabulary.identifier_evidence` no longer treats a weak identifier word
+  as an identifier when a measure word is present, so `تعداد پرونده` stays a count
+  measure while `شماره پرونده` stays an identifier.
+- `app/workflow.py` / `core/models.py`: `AnalysisResult.semantic_matching` is built
+  after semantics, quality and structure intelligence (so sheet-level period evidence is
+  available) and serialized into the processed JSON.
+- `app/folder_workflow.py`: `FolderResult.matching` is built with
+  `match_across_sources` over every analyzed file; the folder report gains
+  «تطبیق شاخص‌ها بین منابع» and a summary line.
+- `report_writer.py` / `generic_report.py`: the audit profile writes
+  «تطبیق معنایی منابع» with matched/probable/ambiguous/rejected decisions, Persian
+  period/unit labels, period status, comparability and reasons; the clean profile never
+  writes it.
+- `tests/test_semantic_matching.py` (new, 23 tests) covers the seven required cases
+  with real openpyxl workbooks: different names, similar names for different
+  indicators, different period formats, Persian/Gregorian date references, different
+  unit dimensions, unit scale, missing periods, ambiguity, category-value overlap
+  (now a probable match), shared identifier values, aggregation-label rejection, a configured synonym mapping equivalent categories,
+  reordered tables with an extra descriptive column, conflicting periods in one field,
+  month titles under a year-only sheet name (including two month blocks in one sheet),
+  multi-month named periods, multi-period sets that require full coverage, the period
+  parser, the audit-only report sheet, serialization and cross-file folder matching.
+- `tests/test_output_quality.py` now guards «تطبیق معنایی منابع» as audit-only.
+
+### Test evidence [SBX]
+
+Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
+
+```text
+python -m pytest tests/test_semantic_matching.py -o addopts="" -q
+-> 23 passed in 2.11s (exit 0)
+
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+-> 278 passed, 6 skipped, 36 deselected, 1 xfailed in 31.66s (exit 0)
+```
+
+The single `xfailed` outcome remains T9 (output suffix validation). The 36 deselected
+tests are the `requires_sample` set; the private reference workbook is absent. The six
+skips are optional GUI/monitoring tests whose system libraries are unavailable in this
+sandbox. None is counted as passing.
+
+### Not validated
+
+- The owner's Windows environment, the three original administrative files and real
+  cross-file acceptance; all evidence uses synthetic `.xlsx` files.
+- The matching vocabulary is deliberately small. A domain synonym not present in
+  `config/synonyms.json` or the built-in administrative vocabulary will be reported as
+  `ambiguous`/`rejected` rather than guessed.
+- A Jalali month and a Gregorian month with the same name do not have identical date
+  ranges, so they are `overlapping`, not `equivalent`; only identical ranges are
+  comparable. An explicit day or range that converts to the same dates is equivalent.
+- Matching is pairwise. Very large folders (hundreds of files with many fields) have no
+  field cap yet and can be slow; the report records decisions, not an exhaustive index.
+- No unrestricted aggregation is performed in this stage. `comparable=True` only means
+  the two values may be compared; later stages must still apply the declared-total and
+  reconciliation rules from Prompt 02B.

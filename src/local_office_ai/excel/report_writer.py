@@ -182,6 +182,9 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
         "statistical_reconciliation": lambda self, wb, context: self._statistical_reconciliation_sheet(
             wb, context.analysis
         ),
+        "semantic_matching": lambda self, wb, context: self._semantic_matching_sheet(
+            wb, context.analysis
+        ),
     }
 
     def _plan(self, context: ReportContext, profile: str) -> list[str]:
@@ -238,6 +241,8 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
             audit_tail.append("quality_details")
         if getattr(analysis, "statistical_reconciliation", None) is not None:
             audit_tail.append("statistical_reconciliation")
+        if getattr(analysis, "semantic_matching", None) is not None:
+            audit_tail.append("semantic_matching")
         audit_tail.extend(
             [
                 "normalized",

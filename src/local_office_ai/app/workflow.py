@@ -44,6 +44,7 @@ from local_office_ai.excel.row_classification import (
     summary_rows_from_roles,
 )
 from local_office_ai.excel.semantic_classification import SemanticClassifier
+from local_office_ai.excel.semantic_matching import SemanticMatcher
 from local_office_ai.excel.sheet_analyzer import SheetGrid
 from local_office_ai.excel.statistical_analysis import StatisticalAnalyzer
 from local_office_ai.excel.structure_intelligence import StructureIntelligenceAnalyzer
@@ -340,6 +341,11 @@ class ExcelIntelligenceWorkflow:
             sheet_intelligence.append(intel)
         analysis.sheets = sheet_intelligence
         analysis.intelligence = structure_engine.finalize(str(meta.path), sheet_intelligence)
+        # Matching needs the finalized sheet-level period evidence (a month
+        # title combined with the sheet year), not only the raw block titles.
+        analysis.semantic_matching = SemanticMatcher(self.settings).match_analysis(
+            analysis, source_name=Path(bundle.path).name
+        )
         analysis.extraction = ExtractionModelBuilder(self.settings).build(
             source_path=bundle.path,
             sheet_names=[sheet.title for sheet in meta.sheets],
