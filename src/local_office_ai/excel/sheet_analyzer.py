@@ -24,6 +24,7 @@ from local_office_ai.excel.normalization import (
     normalize_text,
     parse_value,
 )
+from local_office_ai.excel.semantic_vocabulary import identifier_evidence
 
 SUBTOTAL_KEYWORDS = (
     "جمع جزء", "جمع فرعی", "جمع گروه", "جمع دسته",
@@ -1066,9 +1067,10 @@ class SheetAnalyzer:
         notes: list[str] = []
         for profile in profiles:
             numbers = self._numeric_values(profile, first_data_row, last_data_row)
-            if profile.role is ColumnRole.ID:
-                profile.statistical_role = DataRole.IDENTIFIER
-            elif profile.role is ColumnRole.DATE:
+            samples = [str(sample) for sample in profile.samples]
+            temporal_kind = self._temporal_key_kind(profile.header, numbers)
+            id_evidence = identifier_evidence(profile.header, numbers, samples)
+            if profile.role is ColumnRole.DATE:
                 if profile.date_ratio >= 0.5:
                     profile.statistical_role = DataRole.TEMPORAL_KEY
                 elif self._is_day_of_month(numbers):
@@ -1078,14 +1080,18 @@ class SheetAnalyzer:
                     )
                 else:
                     profile.statistical_role = DataRole.UNKNOWN
-            elif (
-                profile.role not in NUMERIC_ROLES
-                and self._temporal_key_kind(profile.header, numbers) is not None
-            ):
+            elif temporal_kind is not None:
+                # A year/month/day key wins over an ID header such as «شماره ماه»:
+                # both are keys, and neither is a measure.
                 profile.statistical_role = DataRole.TEMPORAL_KEY
                 profile.notes.append(
                     "کلید زمانی (سال/ماه/روز) بر پایه عنوان و محتوا؛ در میانگین، واریانس و همبستگی وارد نمی‌شود."
                 )
+            elif id_evidence:
+                profile.statistical_role = DataRole.IDENTIFIER
+                profile.notes.extend(id_evidence)
+            elif profile.role is ColumnRole.ID:
+                profile.statistical_role = DataRole.IDENTIFIER
             elif profile.role in NUMERIC_ROLES:
                 profile.statistical_role = DataRole.NUMERIC_MEASURE
             elif profile.text_ratio >= 0.5:
@@ -1105,7 +1111,10 @@ class SheetAnalyzer:
                     profile.notes.append("دنباله یکتا و صعودی ۱..n؛ شناسه ردیف است.")
                 else:
                     profile.statistical_role = DataRole.NUMERIC_MEASURE
-            if profile.formula_ratio >= 0.5:
+            if (
+                profile.formula_ratio >= 0.5
+                and profile.statistical_role not in {DataRole.IDENTIFIER, DataRole.TEMPORAL_KEY}
+            ):
                 profile.statistical_role = DataRole.CALCULATED
             if profile.statistical_role is DataRole.TEMPORAL_KEY and profile.role is not ColumnRole.DATE:
                 notes.append(f"ستون «{profile.header or profile.letter}» کلید زمانی است.")

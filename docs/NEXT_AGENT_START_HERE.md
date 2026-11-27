@@ -1,11 +1,12 @@
-# Next Agent Start Here — Prompt 01B
+# Next Agent Start Here — Prompt 02A
 
 ## Repository and starting point
 
 - Repository: `hamedfallahi00120-cmyk/works` (private).
 - Accepted Phase-0 base on `main`: `6df625659c97c0b7da1f78f33fa5fc37864a7580`.
-- Prompt 01A was merged to `main` as PR #4; `main` is at `f572c47`.
-- Dedicated Prompt 01B branch: `feature/prompt-01b-multiblock-extraction`.
+- Prompt 01A was merged to `main` as PR #4; `main` was at `f572c47`.
+- Prompt 01B was merged to `main` as PR #5; `main` is at `113cc1f`.
+- Dedicated Prompt 02A branch: `feature/prompt-02a-semantic-quality`.
 - The three original administrative source files and the private sample workbook are
   intentionally not stored in GitHub.
 
@@ -19,21 +20,21 @@ and merged. See the Prompt 01A section in `docs/quality_evidence.md` and
 `docs/prompt_01a_technical_report.md`. Prompt 01B has its own
 `docs/prompt_01b_technical_report.md`.
 
-**Prompt 01B — Multi-Block Extraction, Table Boundaries, and Total Detection — is
-implemented on `feature/prompt-01b-multiblock-extraction`.** It adds the shared
-`row_classification` module, keeps mid-table subtotals inside their block, records
-subtotal and grand-total rows, analyzes every analyzable block on a sheet, and writes
-the audit-only «بلوک‌های استخراج» sheet. The branch is local and is not merged or pushed
-to `main`.
+**Prompt 02A — Semantic Classification and Data Quality Validation — is implemented
+on `feature/prompt-02a-semantic-quality`.** It adds `semantic_vocabulary`,
+`semantic_classification` and `data_quality`, protects numeric identifiers from becoming
+measures, records `PASS`/`WARNING`/`FAIL` findings with their locations, and writes the
+audit-only «نقش‌های معنایی» and «کیفیت داده (تفصیلی)» sheets. The branch is local and is
+not merged or pushed to `main`. See `docs/prompt_02a_technical_report.md`.
 
 Recorded sandbox evidence:
 
 ```text
-python -m pytest tests/test_multiblock_extraction.py -o addopts="" -q
--> 16 passed in 0.46s
+python -m pytest tests/test_semantic_quality.py -o addopts="" -q
+-> 13 passed in 0.58s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 196 passed, 6 skipped, 36 deselected, 1 xfailed in 20.75s
+-> 209 passed, 6 skipped, 36 deselected, 1 xfailed in 23.12s
 ```
 
 The `xfailed` result is T9. The 36 deselected tests are `requires_sample`; their private
@@ -41,7 +42,7 @@ workbook is absent and they are not counted as passing.
 
 ## Start procedure
 
-1. Fetch the private repository and switch to `feature/prompt-01b-multiblock-extraction`.
+1. Fetch the private repository and switch to `feature/prompt-02a-semantic-quality`.
 2. Verify the current branch, HEAD SHA and clean working tree. Record the exact output.
 3. Read, in this order:
    - `MASTER_PROJECT_HANDOVER_PUBLIC.txt`
@@ -51,9 +52,9 @@ workbook is absent and they are not counted as passing.
    - this file
 4. Use the Phase-0 audit as the accepted baseline. Do not demand that the owner resend
    these files, repeat the audit, or perform another exploratory phase.
-5. Prompt 01A and Prompt 01B are complete. Do not repeat them or substitute audit
-   Phase 1a for them. The next engineering action starts only after the owner accepts
-   Prompt 01B.
+5. Prompt 01A, Prompt 01B and Prompt 02A are complete. Do not repeat them or substitute
+   audit Phase 1a for them. The next engineering action starts only after the owner
+   accepts Prompt 02A.
 6. Work only on a dedicated branch for the next stage. Never commit directly to `main`.
 7. Keep later prompts out of scope until the owner authorizes them. Do not merge or push
    to `main`.

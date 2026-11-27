@@ -32,6 +32,7 @@ from local_office_ai.core.settings import Settings
 from local_office_ai.excel.anomaly_detection import AnomalyDetector
 from local_office_ai.excel.calculations import FinancialCalculator
 from local_office_ai.excel.data_extractor import DataExtractor
+from local_office_ai.excel.data_quality import DataQualityAnalyzer
 from local_office_ai.excel.extraction_model import ExtractionModelBuilder
 from local_office_ai.excel.reader import WorkbookReader
 from local_office_ai.excel.reconciliation import Reconciler
@@ -41,6 +42,7 @@ from local_office_ai.excel.row_classification import (
     role_counts,
     summary_rows_from_roles,
 )
+from local_office_ai.excel.semantic_classification import SemanticClassifier
 from local_office_ai.excel.sheet_analyzer import SheetGrid
 from local_office_ai.excel.statistical_analysis import StatisticalAnalyzer
 from local_office_ai.excel.structure_intelligence import StructureIntelligenceAnalyzer
@@ -263,6 +265,20 @@ class ExcelIntelligenceWorkflow:
         analysis = AnalysisResult(meta=meta, tables=tables + key_value_tables, primary_table=primary)
         analysis.warnings.extend(bundle.warnings)
         analysis.warnings.extend(detection_warnings)
+
+        # ---------------------------------------------------------------- #
+        # Semantic roles and data-quality findings are established before any
+        # statistical conclusion.  A numeric identifier, postal code, personnel
+        # number or year is a key, never a measure, and a questionable value is
+        # recorded with its location instead of being repaired.
+        # ---------------------------------------------------------------- #
+        analysis.semantics = SemanticClassifier(self.settings).classify(
+            source_path=bundle.path,
+            sheet_names=[sheet.title for sheet in meta.sheets],
+            grids=grids,
+            structures=sheet_structures,
+        )
+        analysis.quality = DataQualityAnalyzer(self.settings).analyze(analysis, grids)
 
         if primary is None:
             analysis.warnings.append("هیچ جدول داده قابل اتکایی شناسایی نشد؛ فقط ساختار فایل گزارش شد.")

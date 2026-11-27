@@ -248,3 +248,62 @@ not counted as passing.
 - The owner's Windows environment and the three original administrative files.
 - Real-file acceptance for multi-block workbooks; the evidence uses synthetic `.xlsx`
   files created by the test suite.
+
+## Prompt 02A — Semantic classification and data quality (branch evidence)
+
+Branch `feature/prompt-02a-semantic-quality`, based on `main` at `113cc1f` (the
+merge of Prompt 01B). No cross-source aggregation was added.
+
+### Implementation
+
+- `excel/semantic_vocabulary.py` (new): shared identifier, measure, temporal,
+  unit, scale, currency, negative-allowed and unique-identifier vocabularies plus
+  value-pattern evidence. A measure word in the header blocks the fixed-width and
+  digit-text code rules, so wide monetary amounts stay measures.
+- `excel/semantic_classification.py` (new): `SemanticRole` for `identifier`,
+  `temporal_key`, `measure`, `category`, `group`, `subtotal`, `grand_total` and
+  `descriptive` (plus `calculated` and `unknown`), `SemanticField`,
+  `SemanticBlock`, `WorkbookSemantics` and `SemanticClassifier`. Each field keeps
+  its role, confidence, business/statistical role, unit and evidence. Subtotal
+  and grand-total rows come from the shared `row_classification` module.
+- `excel/data_quality.py` (new): `QualityStatus` (`PASS`/`WARNING`/`FAIL`),
+  `QualityFinding`, `QualityReport` and `DataQualityAnalyzer`. The eight required
+  checks are `missing_values`, `invalid_numeric`, `unexpected_text`,
+  `negative_values`, `duplicate_identifiers`, `inconsistent_units`,
+  `conflicting_periods` and `suspicious_values`. Every check has an explicit
+  status, location, count and samples; values are never repaired.
+- `sheet_analyzer.py`: `assign_statistical_roles` now uses the shared identifier
+  evidence and checks temporal keys before identifiers. Formula ratios no longer
+  override identifier or temporal roles.
+- `core/models.py`: `AnalysisResult.semantics` and `AnalysisResult.quality`,
+  serialized in `to_dict()`.
+- `app/workflow.py`: semantics and quality are built after table detection and
+  before statistics.
+- `generic_report.py` / `report_writer.py`: audit-only «نقش‌های معنایی» and
+  «کیفیت داده (تفصیلی)» sheets; the clean «اعتبارسنجی داده» sheet gains a compact
+  quality summary and lists non-`PASS` findings only.
+- `tests/test_semantic_quality.py` (new, 13 tests) covers the eight required
+  cases with real openpyxl workbooks, plus role coverage, row roles, evidence and
+  serialization. `tests/test_output_quality.py` guards the audit-only sheets.
+
+### Test evidence [SBX]
+
+Sandbox: Linux, CPython 3.13.15. Not Windows-target validation.
+
+```text
+python -m pytest tests/test_semantic_quality.py -o addopts="" -q
+-> 13 passed in 0.58s (exit 0)
+
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+-> 209 passed, 6 skipped, 36 deselected, 1 xfailed in 23.12s (exit 0)
+```
+
+The single `xfailed` outcome is still T9, the open output-suffix defect. The 36
+deselected tests are the `requires_sample` set; their private reference workbook
+is absent and they are not counted as passing.
+
+### Not validated
+
+- The owner's Windows environment and the three original administrative files.
+- Real-file acceptance for the new semantic and quality checks; the evidence uses
+  synthetic `.xlsx` files created by the test suite.
