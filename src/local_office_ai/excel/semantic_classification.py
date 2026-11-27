@@ -102,6 +102,8 @@ class SemanticField:
     business_role: str = ColumnRole.UNKNOWN.value
     statistical_role: str = DataRole.UNKNOWN.value
     unit: str = ""
+    period: str = ""
+    samples: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
@@ -128,6 +130,8 @@ class SemanticField:
             "business_role": self.business_role,
             "statistical_role": self.statistical_role,
             "unit": self.unit,
+            "period": self.period,
+            "samples": list(self.samples),
             "evidence": list(self.evidence),
             "notes": list(self.notes),
         }
@@ -385,6 +389,8 @@ class SemanticClassifier:
             business_role=profile.role.value,
             statistical_role=profile.statistical_role.value,
             unit=unit,
+            period=profile.period or "",
+            samples=list(profile.samples),
             evidence=evidence,
             notes=notes,
         )

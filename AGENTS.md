@@ -17,8 +17,9 @@ restart the project from scratch.** The sanitized project handover is
 
 The repository is private. The preparation baseline is on
 `fix/multisource-extraction-integrity`. Prompt 01A was merged to `main` as PR #4
-(`f572c47`). The dedicated Prompt 01B branch is
-`feature/prompt-01b-multiblock-extraction`. Never work directly on `main`.
+(`f572c47`). Prompt 01B was merged as PR #5 (`113cc1f`), Prompt 02A as PR #6
+(`d173465`) and Prompt 02B as PR #7 (`891b662`). The dedicated Prompt 03A branch is
+`feature/prompt-03a-semantic-source-matching`. Never work directly on `main`.
 
 The preparation baseline is **Phase-1a preparation only**: isolated sandbox evidence,
 four focused tests (T2/T3/T4/T9), the quality ledger, the Phase 0 audit, and the
@@ -35,9 +36,9 @@ T2 and T3 no longer carry xfail markers; they must keep passing normally. Do not
 reintroduce substring totals matching or let temporal keys back into numeric measures.
 
 Prompt 01B was merged to `main` as PR #5 (`113cc1f`). Prompt 02A was merged to `main`
-as PR #6 (`d173465`). Prompt 02B is implemented on
-`feature/prompt-02b-statistical-reconciliation`; the branch is local and is not merged
-or pushed to `main`. See the sections below.
+as PR #6 (`d173465`). Prompt 02B was merged to `main` as PR #7 (`891b662`). Prompt 03A
+is implemented on `feature/prompt-03a-semantic-source-matching`; the branch is local and
+is not merged or pushed to `main`. See the sections below.
 
 ### Prompt 01A extraction model
 
@@ -189,10 +190,61 @@ truncated.
   because the denominator is not certain. An unusable period matrix, or two periods with
   no common complete month, adds a report warning instead of a silent omission.
 
+### Prompt 03A semantic source matching and period alignment
+
+- `excel/period_alignment.py` — `NormalizedPeriod`, `parse_period`, `parse_periods` and
+  `compare_period_sets`. It parses Jalali/Gregorian years, months, days, numeric dates,
+  named months, quarters, halves, seasons, ranges (including compact
+  `1403/01/01-1403/03/31` and `1403-1404`) and dates embedded in headers
+  (`تعداد پرونده 1403/04`). Persian/Arabic-Indic digits are normalized first. A bare
+  year counts only inside the administrative bands (1178–1699 Jalali, 1700–2200
+  Gregorian); a long free-text cell, `ردیف 12` and `کد 1234` are not periods. Comparison returns an
+  explained relation (`equivalent`, `contains`, `within`, `overlapping`, `incompatible`,
+  `unknown`) with real overlap dates. No period is invented.
+- `excel/semantic_matching.py` — controlled cross-source matching. `SourceField` keeps
+  source file, sheet, block, column letter, original header, normalized label, canonical
+  tokens, role, unit (dimension/canonical/scale), periods, title, samples, shared
+  identifier columns and evidence. Label evidence separates content words from measure
+  words and uses a small cross-language administrative vocabulary plus configured
+  synonyms. Units are compared by dimension and scale; periods by date range. A pair is
+  `matched` when label/role/unit identity agree; `comparable` is true only when units are
+  equal (or both absent) and periods are equivalent. Each field and decision carries an
+  explicit period status (`detected`, `not_detected`, `conflicting`, `partial`). The same
+  indicator in different periods stays mapped with `comparable=False`; a missing period
+  is `probable`, never `matched`; two close candidates are `ambiguous` with every
+  candidate kept; similar names for different indicators are `rejected` with the reason.
+  It never aggregates.
+- `semantic_classification.py` — `SemanticField` carries the column period and samples.
+  `semantic_vocabulary.identifier_evidence` does not treat a weak identifier word as an
+  identifier when a measure word is present, so `تعداد پرونده` is a count measure while
+  `شماره پرونده` remains an identifier.
+- `app/workflow.py` / `core/models.py` — `AnalysisResult.semantic_matching` is built after
+  semantics, quality and structure intelligence (so sheet-level period evidence is
+  available) and serialized into the processed JSON.
+- `app/folder_workflow.py` — `FolderResult.matching` is built with
+  `match_across_sources` over all analyzed files; the folder report writes
+  «تطبیق شاخص‌ها بین منابع» and a summary line.
+- `report_writer.py` / `generic_report.py` — the audit profile writes
+  «تطبیق معنایی منابع» with Persian period/unit labels and period status; the clean
+  profile never writes it.
+- `tests/test_semantic_matching.py` (20 tests) covers the seven required cases with real
+  openpyxl workbooks, category-value overlap, shared identifier evidence, conflicting
+  periods, month titles under a year-only sheet name (including two month blocks in one
+  sheet), multi-period sets that require full coverage, the period parser,
+  serialization, audit-only output and cross-file folder matching.
+  `tests/test_output_quality.py` guards the audit-only sheet.
+
+Known limits: the matching vocabulary is deliberately small; an unknown domain synonym
+is reported as `ambiguous`/`rejected` rather than guessed. A Jalali month and a Gregorian
+month with the same name are `overlapping`, not `equivalent`, because their date ranges
+differ; only identical ranges are comparable. Matching is pairwise and has no field cap
+yet, so very large folders can be slow. `comparable=True` only permits a later comparison;
+it does not aggregate, and Prompt 02B reconciliation rules still apply.
+
 ### Instructions for the next AI agent
 
-1. Fetch the repository and start from the branch that contains Prompt 02B
-   (see `docs/quality_evidence.md` for the verified state).
+1. Fetch the repository and start from the branch that contains the latest accepted
+   prompt (see `docs/quality_evidence.md` for the verified state).
 2. Verify the checked-out branch, HEAD SHA and clean working tree. Do not switch to
    `main` for implementation.
 3. Read `docs/NEXT_AGENT_START_HERE.md`, `MASTER_PROJECT_HANDOVER_PUBLIC.txt`,
@@ -201,10 +253,11 @@ truncated.
    Do not repeat the full audit or ask the user to resend these repository documents.
 5. Prompt 01A (**Data Model, Workbook Structure, and Metadata Extraction**), Prompt 01B
    (**Multi-Block Extraction, Table Boundaries, and Total Detection**), Prompt 02A
-   (**Semantic Classification and Data Quality Validation**) and Prompt 02B
-   (**Statistical Reconciliation and Calculation Integrity**) are implemented. Do not
-   repeat them or substitute audit Phase 1a for them. The next engineering action starts
-   only after the owner accepts Prompt 02B.
+   (**Semantic Classification and Data Quality Validation**), Prompt 02B
+   (**Statistical Reconciliation and Calculation Integrity**) and Prompt 03A
+   (**Semantic Source Matching and Period Alignment**) are implemented. Do not repeat
+   them or substitute audit Phase 1a for them. The next engineering action starts only
+   after the owner accepts the latest prompt.
 6. Follow the supplied shared execution contract: one dedicated branch per stage,
    focused tests, actual evidence, no merge/push to `main`, no rewrite of project
    architecture, Python as the numeric source of truth, and Qwen for narrative only.

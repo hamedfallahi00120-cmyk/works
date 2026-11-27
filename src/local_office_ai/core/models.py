@@ -565,6 +565,10 @@ class AnalysisResult:
     # monthly cells and cross-period figures.  Every record carries the
     # expected/calculated values, tolerance, status and source addresses.
     statistical_reconciliation: Any = None
+    # Controlled semantic matching of equivalent fields across worksheets and
+    # files: normalized labels, units, periods, identifier/value evidence and
+    # matched/probable/ambiguous/rejected decisions.  It never aggregates.
+    semantic_matching: Any = None
     # Period matrix built from the periodic sheets (month x period x metric) and
     # the grounded answers to the user's Persian request.
     integration: Any = None
@@ -624,6 +628,11 @@ class AnalysisResult:
                 self.statistical_reconciliation.to_dict()
                 if hasattr(self.statistical_reconciliation, "to_dict")
                 else self.statistical_reconciliation
+            ),
+            "semantic_matching": (
+                self.semantic_matching.to_dict()
+                if hasattr(self.semantic_matching, "to_dict")
+                else self.semantic_matching
             ),
             "validation": [
                 item.to_dict() if hasattr(item, "to_dict") else item for item in self.validation

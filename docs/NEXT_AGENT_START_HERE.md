@@ -1,4 +1,4 @@
-# Next Agent Start Here — Prompt 02B
+# Next Agent Start Here — Prompt 03A
 
 ## Repository and starting point
 
@@ -6,8 +6,9 @@
 - Accepted Phase-0 base on `main`: `6df625659c97c0b7da1f78f33fa5fc37864a7580`.
 - Prompt 01A was merged to `main` as PR #4; `main` was at `f572c47`.
 - Prompt 01B was merged to `main` as PR #5; `main` was at `113cc1f`.
-- Prompt 02A was merged to `main` as PR #6; `main` is at `d173465`.
-- Dedicated Prompt 02B branch: `feature/prompt-02b-statistical-reconciliation`.
+- Prompt 02A was merged to `main` as PR #6; `main` was at `d173465`.
+- Prompt 02B was merged to `main` as PR #7; `main` is at `891b662`.
+- Dedicated Prompt 03A branch: `feature/prompt-03a-semantic-source-matching`.
 - The three original administrative source files and the private sample workbook are
   intentionally not stored in GitHub.
 
@@ -21,36 +22,37 @@ and merged. See the Prompt 01A section in `docs/quality_evidence.md` and
 `docs/prompt_01a_technical_report.md`. Prompt 01B has its own
 `docs/prompt_01b_technical_report.md`.
 
-Prompt 02A was merged to `main` as PR #6. **Prompt 02B — Statistical Reconciliation
-and Calculation Integrity — is implemented on
-`feature/prompt-02b-statistical-reconciliation`.** It adds
-`statistical_reconciliation.py`, validates component/subtotal/group/monthly/cross-period
-relationships without summing unrelated rows, records `PASS`/`WARNING`/`FAIL` with
-expected, calculated, difference, tolerance, explanation and sources, and writes the
-audit-only «تطبیق آماری و صحت محاسبات» sheet. Percentage columns are not summed as
-counts; missing weights, incomplete/missing months and missing declared totals are
-reported; an unusable period matrix adds a warning. Explicit hierarchy and category
-APIs cover structures a flat table cannot prove. The branch is local and is not merged
-or pushed to `main`. See `docs/quality_evidence.md` for the implementation record.
+Prompt 02A was merged to `main` as PR #6. Prompt 02B — Statistical Reconciliation and
+Calculation Integrity — was merged to `main` as PR #7. **Prompt 03A — Semantic Source
+Matching and Period Alignment — is implemented on
+`feature/prompt-03a-semantic-source-matching`.** It adds `period_alignment.py` (Jalali
+and Gregorian periods, ranges and compatibility) and `semantic_matching.py` (controlled
+field matching with label, role, unit, period, identifier and value evidence). Identity
+and value comparability are separate decisions; missing or conflicting periods and
+ambiguous candidates are reported, never guessed. The audit profile writes
+«تطبیق معنایی منابع», and the folder report writes «تطبیق شاخص‌ها بین منابع». The
+branch is local and is not merged or pushed to `main`. See `docs/quality_evidence.md`
+for the implementation record.
 
 Recorded sandbox evidence (Linux, CPython 3.13.15, pytest 9.2.0):
 
 ```text
-python -m pytest tests/test_statistical_reconciliation.py -o addopts="" -q
--> 36 passed in 3.36s
+python -m pytest tests/test_semantic_matching.py -o addopts="" -q
+-> 20 passed in 1.90s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 259 passed, 2 skipped, 36 deselected, 1 xfailed in 29.21s
+-> 275 passed, 6 skipped, 36 deselected, 1 xfailed in 30.81s
 ```
 
 The `xfailed` result is T9. The 36 deselected tests are `requires_sample`; their private
-workbook is absent and they are not counted as passing. The two skips are the PySide6 GUI
-tests (`libEGL.so.1` is unavailable in this sandbox) and are not counted as passing.
+workbook is absent and they are not counted as passing. The six skips are optional
+GUI/monitoring tests whose system libraries are unavailable in this sandbox and are not
+counted as passing.
 
 ## Start procedure
 
 1. Fetch the private repository and switch to
-   `feature/prompt-02b-statistical-reconciliation`.
+   `feature/prompt-03a-semantic-source-matching`.
 2. Verify the current branch, HEAD SHA and clean working tree. Record the exact output.
 3. Read, in this order:
    - `MASTER_PROJECT_HANDOVER_PUBLIC.txt`
@@ -60,9 +62,9 @@ tests (`libEGL.so.1` is unavailable in this sandbox) and are not counted as pass
    - this file
 4. Use the Phase-0 audit as the accepted baseline. Do not demand that the owner resend
    these files, repeat the audit, or perform another exploratory phase.
-5. Prompt 01A, Prompt 01B, Prompt 02A and Prompt 02B are complete. Do not repeat them or
-   substitute audit Phase 1a for them. The next engineering action starts only after the
-   owner accepts Prompt 02B.
+5. Prompt 01A, Prompt 01B, Prompt 02A, Prompt 02B and Prompt 03A are complete. Do not
+   repeat them or substitute audit Phase 1a for them. The next engineering action starts
+   only after the owner accepts Prompt 03A.
 6. Work only on a dedicated branch for the next stage. Never commit directly to `main`.
 7. Keep later prompts out of scope until the owner authorizes them. Do not merge or push
    to `main`.
