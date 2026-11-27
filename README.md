@@ -44,7 +44,7 @@ logs/                         محل لاگ در زمان اجرا (در مخز�
 ### چه چیزی در بسته هست و چه چیزی نیست
 
 **هست:** کل سورس `src/`، کل `tests/`، لانچرها، `requirements.txt`،
-`requirements-documents.txt`، `pytest.ini`، `config/`، `docs/`، `legacy/`، `AGENTS.md`،
+`requirements-documents.txt`، `requirements-dev.txt`، `pytest.ini`، `config/`، `docs/`، `legacy/`، `AGENTS.md`،
 `DEPLOY.md`، `Deploy_Update.bat`.
 
 **نیست (و عمداً جعل نشده):**
@@ -82,8 +82,9 @@ python -m pytest tests -o addopts="" -q
 
 1. `AGENTS.md` را کامل بخوانید؛ قواعد موتور و لایهٔ رابط در آن آمده است.
 2. `docs/ui_ux_refined_report.md` (دامنهٔ پاس رابط) و `docs/final_delivery_report.md` را ببینید.
-3. `pip install -r requirements.txt` سپس
-   `python -m pytest tests -o addopts="" -q`.
+3. `pip install -r requirements.txt -r requirements-documents.txt -r requirements-dev.txt` سپس
+   `python -m pytest tests -o addopts="" -q`؛ برای اجرای CI یا محیطی که فایل نمونه را ندارد:
+   `python -m pytest tests -o addopts="" -q -m "not requires_sample"`.
 4. برای بازگرداندن پوشش تست‌های مرجع، فایل نمونه را در `data/input/` قرار دهید؛
    بدون آن بخش زیادی از تست‌ها با خطای «reference workbook is missing» متوقف می‌شوند.
 5. روی شاخهٔ اختصاصی خود کار کنید و تغییرات را با Pull Request ارائه دهید.
@@ -129,6 +130,13 @@ python -m pytest tests -o addopts="" -q
 ```bat
 cd /d F:\Local-Office-AI
 venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+وابستگی‌های مخصوص تست (`pytest` و `reportlab`) در `requirements-dev.txt` جدا شده‌اند و
+برای اجرای برنامه لازم نیستند:
+
+```bat
+venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 ```
 
 وابستگی‌های موتور `openpyxl` و `psutil` هستند و رابط مدرن به `PySide6` نیاز دارد.

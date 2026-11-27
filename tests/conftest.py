@@ -27,6 +27,17 @@ from local_office_ai.core.settings import load_settings  # noqa: E402
 SAMPLE = ROOT / "data" / "input" / "Book2_AI_V4_2_Monitored.xlsx"
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Tag tests that need the reference workbook, which this repository does not ship.
+
+    CI runs ``-m "not requires_sample"`` so a missing, non-public data asset is
+    reported as an explicit exclusion instead of an unexplained error.
+    """
+    for item in items:
+        if "sample_path" in getattr(item, "fixturenames", ()):
+            item.add_marker(pytest.mark.requires_sample)
+
+
 @pytest.fixture()
 def project_root(tmp_path: Path) -> Path:
     root = tmp_path / "project"
