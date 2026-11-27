@@ -37,8 +37,8 @@ reintroduce substring totals matching or let temporal keys back into numeric mea
 
 Prompt 01B was merged to `main` as PR #5 (`113cc1f`). Prompt 02A was merged to `main`
 as PR #6 (`d173465`). Prompt 02B was merged to `main` as PR #7 (`891b662`). Prompt 03A
-is implemented on `feature/prompt-03a-semantic-source-matching`; the branch is local and
-is not merged or pushed to `main`. See the sections below.
+is implemented on `feature/prompt-03a-semantic-source-matching`; the branch is pushed to
+origin and PR #8 is open, but it is not merged to `main`. See the sections below.
 
 ### Prompt 01A extraction model
 
