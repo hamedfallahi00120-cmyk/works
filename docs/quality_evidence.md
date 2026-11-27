@@ -288,12 +288,12 @@ merge of Prompt 01B). No cross-source aggregation was added.
   «کیفیت داده (تفصیلی)» sheets (the latter includes a block column); the clean
   «اعتبارسنجی داده» sheet gains a compact quality summary and lists non-`PASS`
   findings only.
-- `tests/test_semantic_quality.py` (new, 20 tests) covers the eight required
-  cases with real openpyxl workbooks, plus administrative/vehicle/region/record
-  identifiers, English and Arabic-Indic digits, all-text measure columns,
-  cross-source period conflicts, quality on every block, role coverage, row roles,
-  evidence and serialization. `tests/test_output_quality.py` guards the
-  audit-only sheets.
+- `tests/test_semantic_quality.py` (new, 23 tests) covers the eight required
+  cases with real openpyxl workbooks, plus administrative/vehicle/region/record and
+  plural identifiers, English and Arabic-Indic digits, all-text measure columns,
+  category headers that mention a measure word, metadata evidence, cross-source period
+  conflicts, quality on every block, role coverage, row roles, evidence and serialization.
+  `tests/test_output_quality.py` guards the audit-only sheets.
 
 ### Test evidence [SBX]
 
@@ -303,10 +303,10 @@ requirements files before this run.
 
 ```text
 python -m pytest tests/test_semantic_quality.py -o addopts="" -q
--> 20 passed in 1.10s (exit 0)
+-> 23 passed in 1.35s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 220 passed, 2 skipped, 36 deselected, 1 xfailed in 24.97s (exit 0)
+-> 223 passed, 2 skipped, 36 deselected, 1 xfailed in 25.58s (exit 0)
 ```
 
 The single `xfailed` outcome is still T9, the open output-suffix defect. The 36

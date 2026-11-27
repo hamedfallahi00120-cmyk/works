@@ -121,13 +121,13 @@ year or month absent from every header and row label is the reported case.
 
 ## Tests
 
-`tests/test_semantic_quality.py` (20 tests) covers the eight required cases with
+`tests/test_semantic_quality.py` (23 tests) covers the eight required cases with
 real `.xlsx` files created by openpyxl:
 
 1. numeric identifiers versus numeric measures, including a fixed-width code
    without an identifier keyword, a ten-digit monetary amount that stays a
-   measure, administrative/vehicle/region codes, a record number, an English
-   postal code and Arabic-Indic digits;
+   measure, administrative/vehicle/region codes, a Persian plural code header, a
+   record number, an English postal code and Arabic-Indic digits;
 2. date, year and month fields versus numeric measures;
 3. missing values with their exact cells;
 4. invalid numeric content, including an Excel error, a mixed value and pure
@@ -139,8 +139,8 @@ real `.xlsx` files created by openpyxl:
 8. duplicate national identifiers and duplicate record numbers.
 
 Additional tests cover the required role vocabulary, subtotal/grand-total row
-roles, identifier evidence, all-text measure columns, quality on every
-analyzable block, the presence of every required check status, and JSON
+roles, identifier evidence, metadata evidence, all-text measure columns, category
+headers that mention a measure word, quality on every analyzable block, the presence of every required check status, and JSON
 serialization. `tests/test_output_quality.py` now asserts the two new audit
 sheets are present in audit output and absent from clean output.
 

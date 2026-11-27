@@ -101,6 +101,31 @@ def test_identifier_evidence_is_recorded(settings, make_workbook):
     assert any("برگه" in item for item in field.evidence)
 
 
+def test_metadata_supports_role_evidence(settings, make_workbook):
+    path = make_workbook(
+        "metadata.xlsx",
+        {
+            "کدهای پرسنلی": [
+                ["شناسه", "مبلغ"],
+                [2184, 1000],
+                [2079, 2000],
+                [2047, 3000],
+            ],
+            "آمار مبلغ": [
+                ["شرح", "مبلغ"],
+                ["الف", 1000],
+                ["ب", 2000],
+                ["ج", 3000],
+            ],
+        },
+    )
+    analysis = _analyze(settings, path)
+    identifier = _fields(analysis, "کدهای پرسنلی")["شناسه"]
+    assert any("برگه/عنوان فایل نیز به شناسه" in item for item in identifier.evidence)
+    measure = _fields(analysis, "آمار مبلغ")["مبلغ"]
+    assert any("برگه/عنوان فایل نیز به اندازه‌گیری" in item for item in measure.evidence)
+
+
 def test_administrative_vehicle_region_and_record_codes_stay_identifiers(
     settings, make_workbook
 ):
@@ -125,6 +150,24 @@ def test_administrative_vehicle_region_and_record_codes_stay_identifiers(
     measures = {column.header for column in analysis.intelligence.sheet("داده").measures}
     assert "مبلغ" in measures
     assert not set(identifiers) & measures
+
+
+def test_plural_persian_identifier_header_is_protected(settings, make_workbook):
+    path = make_workbook(
+        "plural_codes.xlsx",
+        {
+            "داده": [
+                ["کدهای اداری", "مبلغ"],
+                [1001, 1000],
+                [205, 2000],
+                [3090, 3000],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    fields = _fields(analysis, "داده")
+    assert fields["کدهای اداری"].role is SemanticRole.IDENTIFIER
+    assert fields["مبلغ"].role is SemanticRole.MEASURE
 
 
 def test_english_and_arabic_digit_identifiers_are_protected(settings, make_workbook):
@@ -259,6 +302,32 @@ def test_all_text_measure_column_is_reported_as_unexpected_text(
     assert unexpected[0].count == 3
     # «توضیحات مبلغ» is descriptive, not a broken numeric column.
     assert all(finding.column != "D" for finding in unexpected)
+
+
+def test_category_header_with_measure_word_is_not_flagged_as_numeric(
+    settings, make_workbook
+):
+    path = make_workbook(
+        "category_measure_header.xlsx",
+        {
+            "داده": [
+                ["شرح", "نوع مبلغ", "مبلغ"],
+                ["الف", "نقدی", 1000],
+                ["ب", "چکی", 2000],
+                ["ج", "نقدی", 3000],
+            ]
+        },
+    )
+    analysis = _analyze(settings, path)
+    fields = _fields(analysis, "داده")
+    assert fields["نوع مبلغ"].role in {SemanticRole.CATEGORY, SemanticRole.GROUP}
+    numeric_findings = [
+        finding
+        for finding in analysis.quality.findings
+        if finding.code in {"unexpected_text", "invalid_numeric"}
+        and finding.column == "B"
+    ]
+    assert not numeric_findings
 
 
 # --------------------------------------------------------------------------- #

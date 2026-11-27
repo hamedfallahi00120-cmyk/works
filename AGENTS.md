@@ -135,12 +135,13 @@ truncated.
 - The audit profile writes «نقش‌های معنایی» and «کیفیت داده (تفصیلی)» (with a block
   column); the clean profile never does. The clean «اعتبارسنجی داده» sheet shows a compact
   quality summary and only non-`PASS` findings.
-- `tests/test_semantic_quality.py` (20 tests) covers numeric identifiers versus measures,
+- `tests/test_semantic_quality.py` (23 tests) covers numeric identifiers versus measures,
   date/year/month keys versus measures, missing values, invalid numeric content,
   unexpected text, negative values, unit inconsistencies, conflicting periods,
-  duplicate identifiers and record numbers, administrative/vehicle/region codes, English
-  and Arabic-Indic digits, all-text measure columns and per-block quality with real
-  openpyxl workbooks. `tests/test_output_quality.py` guards the two audit-only sheets.
+  duplicate identifiers and record numbers, administrative/vehicle/region and plural code
+  headers, English and Arabic-Indic digits, all-text measure columns, category headers
+  that mention a measure word, metadata evidence and per-block quality with real openpyxl
+  workbooks. `tests/test_output_quality.py` guards the two audit-only sheets.
 
 ### Instructions for the next AI agent
 

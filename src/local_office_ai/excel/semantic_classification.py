@@ -14,8 +14,8 @@ they are reported on the block, never folded into a column measure.
 
 Classification uses column labels, row labels, neighbouring fields, value
 patterns, workbook structure (parent/sub/period headers, block kind) and the
-available metadata (sheet and block titles).  A numeric identifier is never
-reclassified as a measure.
+available metadata (filename, sheet and block titles).  A numeric identifier is
+never reclassified as a measure.
 """
 
 from __future__ import annotations
@@ -39,6 +39,8 @@ from local_office_ai.excel.row_classification import (
     summary_rows_from_roles,
 )
 from local_office_ai.excel.semantic_vocabulary import (
+    has_identifier_word,
+    has_measure_word,
     identifier_evidence,
     matches_word,
     unit_from_header,
@@ -365,12 +367,21 @@ class SemanticClassifier:
         if not evidence:
             evidence.append("شاهد کافی برای نقش قطعی پیدا نشد")
 
+        metadata = " ".join(part for part in (filename, table.sheet, table.title) if part)
+        confidence = self._confidence(profile, role)
+        if role is SemanticRole.IDENTIFIER and has_identifier_word(metadata, strong_only=True):
+            confidence = min(1.0, confidence + 0.05)
+            evidence.append("برگه/عنوان فایل نیز به شناسه اشاره دارد")
+        elif role is SemanticRole.MEASURE and has_measure_word(metadata):
+            confidence = min(1.0, confidence + 0.05)
+            evidence.append("برگه/عنوان فایل نیز به اندازه‌گیری اشاره دارد")
+
         return SemanticField(
             column=profile.index,
             letter=profile.letter,
             header=profile.header,
             role=role,
-            confidence=self._confidence(profile, role),
+            confidence=confidence,
             business_role=profile.role.value,
             statistical_role=profile.statistical_role.value,
             unit=unit,
