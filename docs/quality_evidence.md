@@ -491,11 +491,11 @@ PR #8 open, not merged to `main`. Base: `main` at `891b662` (PR #7 merged).
   «تطبیق معنایی منابع» with matched/probable/ambiguous/rejected decisions, Persian
   period/unit labels, period status, comparability and reasons; the clean profile never
   writes it.
-- `tests/test_semantic_matching.py` (new, 22 tests) covers the seven required cases
+- `tests/test_semantic_matching.py` (new, 23 tests) covers the seven required cases
   with real openpyxl workbooks: different names, similar names for different
   indicators, different period formats, Persian/Gregorian date references, different
   unit dimensions, unit scale, missing periods, ambiguity, category-value overlap
-  (now a probable match), shared identifier values, aggregation-label rejection,
+  (now a probable match), shared identifier values, aggregation-label rejection, a configured synonym mapping equivalent categories,
   reordered tables with an extra descriptive column, conflicting periods in one field,
   month titles under a year-only sheet name (including two month blocks in one sheet),
   multi-month named periods, multi-period sets that require full coverage, the period
@@ -508,10 +508,10 @@ Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
 
 ```text
 python -m pytest tests/test_semantic_matching.py -o addopts="" -q
--> 22 passed in 2.04s (exit 0)
+-> 23 passed in 2.12s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 277 passed, 6 skipped, 36 deselected, 1 xfailed in 30.97s (exit 0)
+-> 278 passed, 6 skipped, 36 deselected, 1 xfailed in 31.12s (exit 0)
 ```
 
 The single `xfailed` outcome remains T9 (output suffix validation). The 36 deselected

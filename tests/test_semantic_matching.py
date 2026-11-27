@@ -415,6 +415,37 @@ def test_equivalent_categories_with_different_names_become_probable(settings, ma
     assert "هم‌پوشانی" in " ".join(records[0].evidence)
 
 
+def test_configured_synonym_maps_equivalent_category_names(settings, make_workbook):
+    settings.synonyms = {"دسته بزه": "نوع جرم"}
+    path = make_workbook(
+        "synonym-categories.xlsx",
+        {
+            "اول": [
+                ["گزارش تیر 1403"],
+                [],
+                ["نوع جرم", "تعداد"],
+                ["سرقت", 10],
+                ["ضرب", 20],
+            ],
+            "دوم": [
+                ["گزارش تیر 1403"],
+                [],
+                ["دسته بزه", "تعداد"],
+                ["سرقت", 12],
+                ["ضرب", 22],
+            ],
+        },
+    )
+    report = _analyse(settings, path).semantic_matching
+    matches = [
+        match
+        for match in report.matches
+        if {member.header for member in match.members} == {"نوع جرم", "دسته بزه"}
+    ]
+    assert matches, "the configured synonym did not map the equivalent categories"
+    assert matches[0].comparable is True
+
+
 def test_reordered_and_extra_columns_still_match_indicators(settings, make_workbook):
     path = make_workbook(
         "different-structures.xlsx",

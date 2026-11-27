@@ -240,10 +240,10 @@ truncated.
 - `report_writer.py` / `generic_report.py` — the audit profile writes
   «تطبیق معنایی منابع» with Persian period/unit labels and period status; the clean
   profile never writes it.
-- `tests/test_semantic_matching.py` (22 tests) covers the seven required cases with real
+- `tests/test_semantic_matching.py` (23 tests) covers the seven required cases with real
   openpyxl workbooks, category-value overlap (probable, not definitive), shared
-  identifier values, aggregation-label rejection, reordered tables with an extra
-  descriptive column, conflicting periods, month titles under a year-only sheet name
+  identifier values, aggregation-label rejection, a configured synonym mapping equivalent categories,
+  reordered tables with an extra descriptive column, conflicting periods, month titles under a year-only sheet name
   (including two month blocks in one sheet), multi-month named periods, multi-period
   sets that require full coverage, the period parser, serialization, audit-only output
   and cross-file folder matching.
