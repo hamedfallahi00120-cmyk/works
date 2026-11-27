@@ -1,0 +1,20 @@
+{
+  "theme": "dark",
+  "font_family": "",
+  "font_base_size": 13,
+  "font_heading_size": 19,
+  "font_file": "",
+  "model": "",
+  "input_dir": "",
+  "output_dir": "",
+  "hardware_gpu_enabled": true,
+  "hardware_interval": 2.0,
+  "widget_visible": false,
+  "widget_x": -1,
+  "widget_y": -1,
+  "widget_opacity": 0.94,
+  "widget_autostart": false,
+  "last_request": "این اطلاعات را بررسی کن و گزارش مدیریتی تهیه کن.",
+  "last_source": "",
+  "last_folder": ""
+}

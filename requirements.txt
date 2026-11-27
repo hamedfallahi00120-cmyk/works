@@ -1,0 +1,10 @@
+# Runtime dependencies (no pandas/numpy needed: openpyxl + Decimal are enough)
+openpyxl>=3.1,<4
+psutil>=5.9
+
+# Modern desktop interface (the CLI/engine also runs without it).
+# Verified with PySide6 6.12 / Qt 6.12 on the Windows target; 6.6+ works.
+PySide6>=6.6,<7
+
+# Test-only dependency
+pytest>=8.0
