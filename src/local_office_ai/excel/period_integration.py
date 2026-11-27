@@ -632,7 +632,13 @@ class PeriodIntegrator:
         role = getattr(profile, "role", None)
         if role in {ColumnRole.ID, ColumnRole.DATE}:
             return NOT_CHECKED, None
+        role_map = {
+            item["row"]: item["role"]
+            for item in (getattr(sheet, "row_roles", []) or [])
+        }
         for row in range(start, end + 1):
+            if role_map.get(row, "data") != "data":
+                continue
             raw = grid.value(row, column_index)
             parsed = parse_value(raw, kind_hint=ValueKind.NUMBER)
             if parsed.kind is ValueKind.NUMBER and isinstance(parsed.value, Decimal):

@@ -230,6 +230,74 @@ class GenericReportMixin:
         self._print_setup(ws)
 
     # ------------------------------------------------------------------ #
+    def _blocks_sheet(self, wb, analysis: AnalysisResult) -> None:
+        intelligence = analysis.intelligence
+        ws = wb.create_sheet("بلوک‌های استخراج")
+        self._rtl(ws)
+        self._title(ws, "همه بلوک‌های داده‌ای، مرزهای آن‌ها و جمع‌های میانی/پایانی", 14)
+        row = 3
+        if intelligence is None:
+            self._value_cell(ws, row, 1, "اطلاعات بلوک در دسترس نیست.")
+            self._print_setup(ws)
+            return
+        self._header(ws, row, [
+            "برگه", "شناسه بلوک", "آدرس", "نوع", "عنوان", "ردیف سرستون",
+            "اولین داده", "آخرین داده", "پایان بلوک", "تعداد ردیف", "تعداد ستون",
+            "شاخص‌ها", "جمع‌های میانی", "جمع کل", "بلوک اصل", "اطمینان", "هشدار",
+        ])
+        header_row = row
+        row += 1
+        for sheet in intelligence.sheets:
+            for block in sheet.block_analyses:
+                summary = block.get("summary_rows", {})
+                values = [
+                    sheet.sheet,
+                    block.get("block_id", ""),
+                    block.get("block_address") or block.get("address", ""),
+                    block.get("kind", ""),
+                    block.get("title", ""),
+                    block.get("header_row", ""),
+                    block.get("first_data_row", ""),
+                    block.get("last_data_row", ""),
+                    block.get("block_end_row", ""),
+                    block.get("row_count", ""),
+                    block.get("column_count", ""),
+                    "، ".join(block.get("measures", [])[:6]),
+                    "، ".join(str(item) for item in summary.get("subtotal", [])),
+                    "، ".join(str(item) for item in summary.get("total", [])),
+                    "بله" if block.get("is_primary") else "—",
+                    f"{float(block.get('confidence', 0)):.0%}",
+                    "؛ ".join(block.get("warnings", [])[:3]),
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                row += 1
+        self._body(ws, header_row + 1, max(header_row + 1, row - 1), 1, 17)
+
+        relationships = [
+            item for sheet in intelligence.sheets for item in sheet.block_relationships
+        ]
+        if relationships:
+            row += 2
+            self._section(ws, row, "رابطه‌های شناسایی‌شده بین بلوک‌ها", 14)
+            row += 1
+            for item in relationships:
+                text = (
+                    f"{'، '.join(item.get('blocks', []))} — {item.get('note', '')}"
+                    f"{' (مجاور)' if item.get('adjacent') else ''}"
+                )
+                ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=14)
+                ws.cell(row, 1, "• " + text).alignment = Alignment(horizontal="right", wrap_text=True)
+                row += 1
+        self._widths(ws, {
+            "A": 18, "B": 16, "C": 18, "D": 14, "E": 26, "F": 10,
+            "G": 10, "H": 10, "I": 10, "J": 9, "K": 9, "L": 34,
+            "M": 14, "N": 14, "O": 10, "P": 10, "Q": 40,
+        })
+        ws.freeze_panes = "A5"
+        self._print_setup(ws)
+
+    # ------------------------------------------------------------------ #
     def _coverage_sheet(self, wb, analysis: AnalysisResult) -> None:
         intelligence = analysis.intelligence
         ws = wb.create_sheet("کیفیت و پوشش داده")

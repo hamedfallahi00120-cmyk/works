@@ -206,10 +206,20 @@ class TableCandidate:
     header_group_count: int = 0
     data_rows_with_values: int = 0
     notes: list[str] = field(default_factory=list)
+    # The block may continue below ``last_data_row`` with a grand total and
+    # comparison/percentage rows.  Those rows are structural, never data.
+    block_end_row: int = 0
+    subtotal_rows: list[int] = field(default_factory=list)
+    grand_total_rows: list[int] = field(default_factory=list)
 
     @property
     def row_count(self) -> int:
         return max(0, self.last_data_row - self.first_data_row + 1)
+
+    @property
+    def block_end(self) -> int:
+        """Last row owned by this block, including its summary rows."""
+        return max(self.block_end_row or self.last_data_row, self.last_data_row)
 
     @property
     def address(self) -> str:
@@ -218,6 +228,15 @@ class TableCandidate:
         return (
             f"{get_column_letter(self.first_col)}{self.header_row}:"
             f"{get_column_letter(self.last_col)}{self.last_data_row}"
+        )
+
+    @property
+    def block_address(self) -> str:
+        from openpyxl.utils import get_column_letter
+
+        return (
+            f"{get_column_letter(self.first_col)}{self.header_row}:"
+            f"{get_column_letter(self.last_col)}{self.block_end}"
         )
 
     def column_by_role(self, role: ColumnRole) -> ColumnProfile | None:
@@ -251,6 +270,9 @@ class TableCandidate:
             "header_group_count": self.header_group_count,
             "data_rows_with_values": self.data_rows_with_values,
             "notes": list(self.notes),
+            "block_end_row": self.block_end,
+            "subtotal_rows": list(self.subtotal_rows),
+            "grand_total_rows": list(self.grand_total_rows),
             "columns": [column.to_dict() for column in self.columns],
         }
 

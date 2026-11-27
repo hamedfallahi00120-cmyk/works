@@ -57,30 +57,34 @@ from local_office_ai.excel.period_detection import (
     looks_like_year,
     scalar_conflicts,
 )
+from local_office_ai.excel.row_classification import (
+    ROW_BLANK,
+    ROW_DATA,
+    ROW_DATA_MISSING,
+    ROW_DIFFERENCE,
+    ROW_FOOTER,
+    ROW_HEADER,
+    ROW_NOTE,
+    ROW_PERCENTAGE,
+    ROW_ROLE_FA,
+    ROW_SUBHEADER,
+    ROW_TITLE,
+    ROW_TOTAL,
+    SUMMARY_ROLES,
+    classify_block_rows,
+    row_role_from_label,
+)
 from local_office_ai.excel.sheet_analyzer import (
     JALALI_MONTHS,
     HeaderBand,
     SheetGrid,
     extract_periods,
-    is_total_label,
 )
 
 LOGGER = get_logger(__name__)
 
 ZERO = Decimal("0")
 HUNDRED = Decimal("100")
-
-ROW_HEADER = "header"
-ROW_SUBHEADER = "subheader"
-ROW_DATA = "data"
-ROW_DATA_MISSING = "data_missing"
-ROW_TOTAL = "total"
-ROW_DIFFERENCE = "difference"
-ROW_PERCENTAGE = "percentage"
-ROW_NOTE = "note"
-ROW_FOOTER = "footer"
-ROW_TITLE = "title"
-ROW_BLANK = "blank"
 
 STATUS_FULL = "fully_analyzed"
 STATUS_PARTIAL = "partially_analyzed"
@@ -92,26 +96,6 @@ STATUS_FA = {
     STATUS_NONE: "تحلیل نشد",
 }
 
-ROW_ROLE_FA = {
-    ROW_HEADER: "عنوان",
-    ROW_SUBHEADER: "عنوان فرعی",
-    ROW_DATA: "داده",
-    ROW_DATA_MISSING: "دوره بدون مقدار",
-    ROW_TOTAL: "جمع",
-    ROW_DIFFERENCE: "مقایسه",
-    ROW_PERCENTAGE: "درصد",
-    ROW_NOTE: "توضیح",
-    ROW_FOOTER: "پانویس",
-    ROW_TITLE: "عنوان اصلی",
-    ROW_BLANK: "خالی",
-}
-
-_DIFFERENCE_WORDS = ("مقایسه", "اختلاف", "تفاضل", "تغییر", "difference", "delta", "change", "variance")
-_PERCENT_WORDS = ("درصد", "percentage", "percent", "ratio", "نرخ", "سهم")
-_NOTE_WORDS = (
-    "لازم به ذکر", "توضیح", "یادداشت", "منبع", "مأخذ", "ماخذ", "پانویس",
-    "note", "notes", "source", "footnote", "comment",
-)
 _SUM_RANGE = re.compile(r"(?<![A-Z0-9])\$?([A-Z]{1,3})\$?(\d+)\s*:\s*\$?([A-Z]{1,3})\$?(\d+)")
 _SHEET_REF = re.compile(r"(?:'([^']+)'|([^\s'!()=+*/-]+))!")
 
@@ -166,23 +150,6 @@ def expected_days(month_index: int | None) -> int | None:
     if month_index is None:
         return None
     return DAYS_IN_JALALI_MONTH[month_index - 1]
-
-
-def row_role_from_label(label: str, *, has_numbers: bool, long_text: bool = False) -> str:
-    value = _text(label).lower().strip(" :.-")
-    if not value:
-        return ROW_BLANK
-    if is_total_label(value):
-        return ROW_TOTAL
-    if any(word in value for word in _DIFFERENCE_WORDS):
-        return ROW_DIFFERENCE
-    if any(word in value for word in _PERCENT_WORDS):
-        return ROW_PERCENTAGE
-    if any(word in value for word in _NOTE_WORDS) or long_text:
-        return ROW_NOTE
-    if not has_numbers and len(value) > 60:
-        return ROW_FOOTER
-    return ROW_DATA
 
 
 @dataclass
@@ -380,6 +347,8 @@ class SheetIntelligence:
     column_references: dict[str, list[str]] = field(default_factory=dict)
     row_roles: list[dict[str, Any]] = field(default_factory=list)
     summary_rows: dict[str, list[int]] = field(default_factory=dict)
+    block_analyses: list[dict[str, Any]] = field(default_factory=list)
+    block_relationships: list[dict[str, Any]] = field(default_factory=list)
     coverage: DataCoverage | None = None
     audits: list[TotalReconciliation] = field(default_factory=list)
     metadata_conflicts: list[MetadataConflict] = field(default_factory=list)
@@ -439,6 +408,8 @@ class SheetIntelligence:
             "column_references": {key: list(value) for key, value in self.column_references.items()},
             "row_roles": list(self.row_roles),
             "summary_rows": {key: list(value) for key, value in self.summary_rows.items()},
+            "block_analyses": list(self.block_analyses),
+            "block_relationships": list(self.block_relationships),
             "coverage": self.coverage.to_dict() if self.coverage else None,
             "audits": [item.to_dict() for item in self.audits],
             "metadata_conflicts": [item.to_dict() for item in self.metadata_conflicts],
@@ -556,12 +527,12 @@ class StructureIntelligenceAnalyzer:
                     "ماه از نام فایل استنباط شد؛ نام برگه و عنوان هیچ ماهی نداشتند."
                 )
 
-        intel.row_roles, intel.summary_rows = self._row_roles(grid, primary, header_rows)
+        intel.row_roles, intel.summary_rows = self._row_roles(grid, primary, tables)
         intel.derived, intel.referenced_sheets = self._references(
             grid, primary, known_sheets or {grid.sheet_name}
         )
         intel.column_totals, intel.column_references = self._column_totals(
-            grid, primary, known_sheets or {grid.sheet_name}
+            grid, primary, intel, known_sheets or {grid.sheet_name}
         )
         intel.coverage = self._coverage(grid, primary, intel)
         intel.metadata_conflicts = self._metadata_conflicts(intel)
@@ -780,44 +751,90 @@ class StructureIntelligenceAnalyzer:
         self,
         grid: SheetGrid,
         table: TableCandidate,
-        header_rows: list[int],
+        tables: list[TableCandidate] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, list[int]]]:
-        roles: list[dict[str, Any]] = []
-        summary: dict[str, list[int]] = defaultdict(list)
-        measure_cols = [
-            column
-            for column in table.columns
-            if column.role not in {ColumnRole.ID, ColumnRole.DATE}
-        ]
-        last_summary = 0
-        provisional: dict[int, str] = {}
-        labels: dict[int, str] = {}
-        for row in range(1, grid.max_row + 1):
-            label = self._row_label(grid, row, table.first_col, table.last_col)
-            labels[row] = label
-            has_number = self._row_has_numeric(grid, row, measure_cols)
-            has_any_number = self._row_has_numeric(grid, row, table.columns)
-            content = self._row_has_content(grid, row)
-            if not content:
-                role = ROW_BLANK
-            elif row in header_rows:
-                role = ROW_HEADER if row == header_rows[0] else ROW_SUBHEADER
-            elif row < table.first_data_row:
-                role = ROW_TITLE if label else ROW_BLANK
-            elif table.first_data_row <= row <= table.last_data_row:
-                role = ROW_DATA if has_number else ROW_DATA_MISSING
-            else:
-                long_text = len(label) > 60
-                role = row_role_from_label(label, has_numbers=has_any_number, long_text=long_text)
-                if role == ROW_BLANK and has_any_number:
-                    role = ROW_DATA_MISSING
-                if role == ROW_DATA:
-                    role = ROW_NOTE if label else ROW_BLANK
-            provisional[row] = role
-            if role in {ROW_TOTAL, ROW_DIFFERENCE, ROW_PERCENTAGE}:
-                summary[role].append(row)
-                last_summary = max(last_summary, row)
+        """Classify every row, using the block that actually owns it.
 
+        The primary block stays first so overlapping side-by-side blocks resolve
+        consistently.  Secondary blocks get their own header, data, subtotal and
+        grand-total roles instead of being mistaken for notes below the primary
+        table.
+        """
+        ordered = [table] + [
+            candidate
+            for candidate in (tables or [])
+            if candidate is not table
+        ]
+        contexts: list[dict[str, Any]] = []
+        for candidate in ordered:
+            candidate_headers = list(candidate.header_rows or [candidate.header_row])
+            candidate_end = candidate.block_end_row or candidate.last_data_row
+            records = classify_block_rows(
+                grid,
+                candidate,
+                candidate_headers,
+                block_end_row=candidate_end,
+            )
+            contexts.append(
+                {
+                    "table": candidate,
+                    "start": min(candidate_headers),
+                    "end": candidate_end,
+                    "roles": {record.row: record for record in records},
+                    "primary": candidate is table,
+                }
+            )
+
+        all_summary_rows = sorted(
+            {
+                record.row
+                for context in contexts
+                for record in context["roles"].values()
+                if record.role in SUMMARY_ROLES
+            }
+        )
+        last_summary = all_summary_rows[-1] if all_summary_rows else 0
+        summary: dict[str, list[int]] = defaultdict(list)
+        labels: dict[int, str] = {}
+        provisional: dict[int, str] = {}
+        for row in range(1, grid.max_row + 1):
+            context = next(
+                (
+                    candidate_context
+                    for candidate_context in contexts
+                    if candidate_context["start"] <= row <= candidate_context["end"]
+                ),
+                None,
+            )
+            owner = context["table"] if context is not None else table
+            label = self._row_label(grid, row, owner.first_col, owner.last_col)
+            labels[row] = label
+            if context is not None:
+                record = context["roles"].get(row)
+                role = record.role if record is not None else ROW_BLANK
+            else:
+                has_any_number = self._row_has_numeric(grid, row, table.columns)
+                content = self._row_has_content(grid, row)
+                if not content:
+                    role = ROW_BLANK
+                elif row < table.first_data_row:
+                    role = ROW_TITLE if label else ROW_BLANK
+                elif self._is_block_title_row(grid, row, contexts):
+                    role = ROW_TITLE
+                else:
+                    long_text = len(label) > 60
+                    role = row_role_from_label(
+                        label, has_numbers=has_any_number, long_text=long_text
+                    )
+                    if role == ROW_BLANK and has_any_number:
+                        role = ROW_DATA_MISSING
+                    if role == ROW_DATA:
+                        role = ROW_NOTE if label else ROW_BLANK
+            provisional[row] = role
+            if context is not None and context["primary"] and role in SUMMARY_ROLES:
+                summary[role].append(row)
+
+        roles: list[dict[str, Any]] = []
         for row in range(1, grid.max_row + 1):
             role = provisional[row]
             if role == ROW_NOTE and row > last_summary:
@@ -831,6 +848,22 @@ class StructureIntelligenceAnalyzer:
                 }
             )
         return roles, {key: sorted(value) for key, value in summary.items()}
+
+    @staticmethod
+    def _is_block_title_row(
+        grid: SheetGrid,
+        row: int,
+        contexts: list[dict[str, Any]],
+    ) -> bool:
+        cells = [cell for cell in grid.row_cells(row) if not cell.is_empty]
+        if len(cells) != 1 or not isinstance(cells[0].value, str):
+            return False
+        if looks_like_number(cells[0].value) or looks_like_date(cells[0].value):
+            return False
+        for context in contexts:
+            if 0 < context["start"] - row <= 3:
+                return True
+        return False
 
     @staticmethod
     def _fallback_roles(grid: SheetGrid) -> list[dict[str, Any]]:
@@ -886,10 +919,14 @@ class StructureIntelligenceAnalyzer:
         column: ColumnProfile,
         first_row: int,
         last_row: int,
+        skip_rows: set[int] | None = None,
     ) -> tuple[list[Decimal], int, int, int, int]:
         values: list[Decimal] = []
         zeros = blanks = invalid = errors = 0
+        excluded = skip_rows or set()
         for row in range(first_row, last_row + 1):
+            if row in excluded:
+                continue
             cell = grid.get(row, column.index)
             if cell is None or cell.is_empty:
                 blanks += 1
@@ -909,6 +946,24 @@ class StructureIntelligenceAnalyzer:
                 invalid += 1
         return values, zeros, blanks, invalid, errors
 
+    @staticmethod
+    def _non_data_rows(intel: SheetIntelligence, table: TableCandidate) -> set[int]:
+        """Rows inside a block that must never enter a numerical sum."""
+        structural = SUMMARY_ROLES | {
+            ROW_HEADER,
+            ROW_SUBHEADER,
+            ROW_TITLE,
+            ROW_BLANK,
+            ROW_NOTE,
+            ROW_FOOTER,
+        }
+        role_map = {item["row"]: item["role"] for item in intel.row_roles}
+        return {
+            row
+            for row in range(table.first_data_row, table.last_data_row + 1)
+            if role_map.get(row, ROW_DATA) in structural
+        }
+
     def _coverage(
         self,
         grid: SheetGrid,
@@ -925,8 +980,12 @@ class StructureIntelligenceAnalyzer:
             None,
         )
         measure_cols = intel.measures
+        skip_rows = self._non_data_rows(intel, table)
+        role_map = {item["row"]: item["role"] for item in intel.row_roles}
         observed_rows: list[int] = []
         for row in range(table.first_data_row, table.last_data_row + 1):
+            if row in skip_rows or role_map.get(row, ROW_DATA) != ROW_DATA:
+                continue
             if self._row_has_numeric(grid, row, measure_cols):
                 observed_rows.append(row)
         observed_labels: list[str] = []
@@ -984,7 +1043,11 @@ class StructureIntelligenceAnalyzer:
             coverage.missing_observations = len(coverage.missing_labels)
         for column in measure_cols:
             values, zeros, blanks, invalid, errors = self._column_values(
-                grid, column, table.first_data_row, table.last_data_row
+                grid,
+                column,
+                table.first_data_row,
+                table.last_data_row,
+                skip_rows=skip_rows,
             )
             coverage.explicit_zero_cells += zeros
             coverage.blank_cells += blanks
@@ -1086,6 +1149,7 @@ class StructureIntelligenceAnalyzer:
         intel: SheetIntelligence,
     ) -> list[PeriodComparison]:
         by_index = {column.index: column for column in table.columns}
+        skip_rows = self._non_data_rows(intel, table)
         comparisons: list[PeriodComparison] = []
         for pair in intel.year_pairs:
             left = by_index.get(pair["index_a"])
@@ -1093,10 +1157,18 @@ class StructureIntelligenceAnalyzer:
             if left is None or right is None:
                 continue
             values_a, _, _, _, _ = self._column_values(
-                grid, left, table.first_data_row, table.last_data_row
+                grid,
+                left,
+                table.first_data_row,
+                table.last_data_row,
+                skip_rows=skip_rows,
             )
             values_b, _, _, _, _ = self._column_values(
-                grid, right, table.first_data_row, table.last_data_row
+                grid,
+                right,
+                table.first_data_row,
+                table.last_data_row,
+                skip_rows=skip_rows,
             )
             if not values_a and not values_b:
                 continue
@@ -1143,7 +1215,10 @@ class StructureIntelligenceAnalyzer:
         if temporal is None:
             return []
         days = []
+        skip_rows = self._non_data_rows(intel, table)
         for row in range(table.first_data_row, table.last_data_row + 1):
+            if row in skip_rows:
+                continue
             value = _decimal(grid.value(row, temporal.index))
             if value is not None and float(value).is_integer():
                 days.append(int(value))
@@ -1206,17 +1281,23 @@ class StructureIntelligenceAnalyzer:
         self,
         grid: SheetGrid,
         table: TableCandidate,
+        intel: SheetIntelligence,
         known_sheets: set[str],
     ) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
         totals: list[dict[str, Any]] = []
         references: dict[str, list[str]] = defaultdict(list)
+        skip_rows = self._non_data_rows(intel, table)
         for column in table.columns:
             if column.role in {ColumnRole.ID, ColumnRole.DATE}:
                 continue
             metric = column.parent_header or column.header or column.letter
             period = column.period
             values, _, _, _, _ = self._column_values(
-                grid, column, table.first_data_row, table.last_data_row
+                grid,
+                column,
+                table.first_data_row,
+                table.last_data_row,
+                skip_rows=skip_rows,
             )
             total = sum(values, ZERO) if values else None
             totals.append(
@@ -1232,6 +1313,8 @@ class StructureIntelligenceAnalyzer:
             if period:
                 key = f"{metric} | {period}"
                 for row in range(table.first_data_row, table.last_data_row + 1):
+                    if row in skip_rows:
+                        continue
                     cell = grid.get(row, column.index)
                     if cell is None or not cell.formula:
                         continue
@@ -1257,6 +1340,7 @@ class StructureIntelligenceAnalyzer:
         diff_rows = intel.summary_rows.get(ROW_DIFFERENCE, [])
         percent_rows = intel.summary_rows.get(ROW_PERCENTAGE, [])
         by_index = {column.index: column for column in table.columns}
+        skip_rows = self._non_data_rows(intel, table)
         total_map: dict[int, Decimal | None] = {}
 
         for total_row in total_rows:
@@ -1293,7 +1377,11 @@ class StructureIntelligenceAnalyzer:
                 if declared is None:
                     continue
                 values, zeros, blanks, invalid, errors = self._column_values(
-                    grid, column, table.first_data_row, table.last_data_row
+                    grid,
+                    column,
+                    table.first_data_row,
+                    table.last_data_row,
+                    skip_rows=skip_rows,
                 )
                 computed = sum(values, ZERO) if values else None
                 difference = declared - computed if computed is not None else None

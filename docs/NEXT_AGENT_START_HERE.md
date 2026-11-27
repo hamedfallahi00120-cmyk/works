@@ -1,34 +1,47 @@
-# Next Agent Start Here — Prompt 01A
+# Next Agent Start Here — Prompt 01B
 
 ## Repository and starting point
 
 - Repository: `hamedfallahi00120-cmyk/works` (private).
 - Accepted Phase-0 base on `main`: `6df625659c97c0b7da1f78f33fa5fc37864a7580`.
-- Prepared baseline branch: `fix/multisource-extraction-integrity`.
-- Dedicated working branch for the next stage: `feature/prompt-01a-data-model-metadata`.
-- The three original administrative source files and the private sample workbook are intentionally not stored in GitHub.
+- Prompt 01A was merged to `main` as PR #4; `main` is at `f572c47`.
+- Dedicated Prompt 01B branch: `feature/prompt-01b-multiblock-extraction`.
+- The three original administrative source files and the private sample workbook are
+  intentionally not stored in GitHub.
 
 The Phase-0 read-only audit has already been completed. Its report is
 `PHASE0_BASELINE_AUDIT.md`. Do not repeat Phase 0 or restart the repository audit.
 
 ## Exact status at handoff
 
-The preparation work on the baseline branch consists of:
-- The completed Phase-0 audit and sanitized project handover.
-- Isolated Linux sandbox baseline evidence.
-- Four targeted regression tests: T2, T3, T4 and T9.
-- `docs/quality_evidence.md`.
-- CI configuration aligned to Python 3.14.7, with artifact upload treated as best-effort.
-- Strict expected-failure classification for the three known unresolved defects.
+Prompt 01A — Data Model, Workbook Structure, and Metadata Extraction — is implemented
+and merged. See the Prompt 01A section in `docs/quality_evidence.md` and
+`docs/prompt_01a_technical_report.md`. Prompt 01B has its own
+`docs/prompt_01b_technical_report.md`.
 
-**Prompt 01A — Data Model, Workbook Structure, and Metadata Extraction — is implemented**
-on `feature/prompt-01a-data-model-metadata`; see the Prompt 01A section at the end of
-`docs/quality_evidence.md` and `docs/prompt_01a_technical_report.md`. Prompt 01B has not
-started. The branch is not merged and `main` is unchanged.
+**Prompt 01B — Multi-Block Extraction, Table Boundaries, and Total Detection — is
+implemented on `feature/prompt-01b-multiblock-extraction`.** It adds the shared
+`row_classification` module, keeps mid-table subtotals inside their block, records
+subtotal and grand-total rows, analyzes every analyzable block on a sheet, and writes
+the audit-only «بلوک‌های استخراج» sheet. The branch is local and is not merged or pushed
+to `main`.
+
+Recorded sandbox evidence:
+
+```text
+python -m pytest tests/test_multiblock_extraction.py -o addopts="" -q
+-> 16 passed in 0.46s
+
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+-> 196 passed, 6 skipped, 36 deselected, 1 xfailed in 20.75s
+```
+
+The `xfailed` result is T9. The 36 deselected tests are `requires_sample`; their private
+workbook is absent and they are not counted as passing.
 
 ## Start procedure
 
-1. Fetch the private repository and switch to `feature/prompt-01a-data-model-metadata`.
+1. Fetch the private repository and switch to `feature/prompt-01b-multiblock-extraction`.
 2. Verify the current branch, HEAD SHA and clean working tree. Record the exact output.
 3. Read, in this order:
    - `MASTER_PROJECT_HANDOVER_PUBLIC.txt`
@@ -36,10 +49,14 @@ started. The branch is not merged and `main` is unchanged.
    - `AGENTS.md`
    - `docs/quality_evidence.md`
    - this file
-4. Use the Phase-0 audit as the accepted baseline. Do not demand that the owner resend these files, repeat the audit, or perform another exploratory phase.
-5. The owner will provide the Shared Execution Contract and the exact original Prompt 01A. Start implementing that exact scope; do not reinterpret it as audit Phase 1a.
-6. Work only on the dedicated Prompt 01A branch or a clearly named child branch. Never commit directly to `main`.
-7. Keep Prompt 01B and all later prompts out of scope. Do not merge or push to `main`.
+4. Use the Phase-0 audit as the accepted baseline. Do not demand that the owner resend
+   these files, repeat the audit, or perform another exploratory phase.
+5. Prompt 01A and Prompt 01B are complete. Do not repeat them or substitute audit
+   Phase 1a for them. The next engineering action starts only after the owner accepts
+   Prompt 01B.
+6. Work only on a dedicated branch for the next stage. Never commit directly to `main`.
+7. Keep later prompts out of scope until the owner authorizes them. Do not merge or push
+   to `main`.
 
 ## Test and evidence policy
 
@@ -49,7 +66,8 @@ Run the focused test gate and record the actual output:
 python -m pytest tests -o addopts="" -q -ra -m "not requires_sample"
 ```
 
-Do not rely on historical test counts; collection changes with Python, PySide6 and optional dependencies. Read the latest GitHub Actions run for the exact CI result.
+Do not rely on historical test counts; collection changes with Python, PySide6 and
+optional dependencies. Read the latest GitHub Actions run for the exact CI result.
 
 T2 and T3 are fixed by Prompt 01A and must keep passing normally. T9 is still
 `xfail(strict=True)` because the output-suffix defect remains open. T4 is a normal passing
@@ -61,29 +79,37 @@ The repository workflow is intentionally PR-only:
 - One Windows/Python 3.14.7 test run starts when a PR is opened.
 - A new run starts only when that PR's commit changes (`synchronize`) or the PR is reopened.
 - Documentation-only changes outside the CI path list do not start the test suite.
-- There is **no `push` trigger on `main`** and no test run is subscribed to the PR merge/close event. Therefore merging an already tested PR does not repeat the suite.
-- One invocation of pytest is used. Tests marked `requires_sample` are excluded; there is no second collection run or artifact upload.
-- Do not interpret this as “never test changed code”: each new source/test/dependency/workflow snapshot in a PR must be validated once before merge.
+- There is **no `push` trigger on `main`** and no test run is subscribed to the PR
+  merge/close event. Therefore merging an already tested PR does not repeat the suite.
+- One invocation of pytest is used. Tests marked `requires_sample` are excluded; there is
+  no second collection run or artifact upload.
+- Do not interpret this as “never test changed code”: each new source/test/dependency/
+  workflow snapshot in a PR must be validated once before merge.
 
 ## Fixed project constraints
 
 - Python is the source of truth for extraction, numerical calculations and validation.
-- Qwen is for semantic interpretation and narrative only; it must not invent or calculate source figures.
-- Preserve the existing architecture, UI, RTL behaviour and working functionality; do not rewrite from scratch.
+- Qwen is for semantic interpretation and narrative only; it must not invent or calculate
+  source figures.
+- Preserve the existing architecture, UI, RTL behaviour and working functionality; do not
+  rewrite from scratch.
 - Source documents are read-only.
 - Do not recreate, modify or upgrade the owner's Windows venv or system Python.
 - Preserve `F:\work`, `legacy/`, user data and existing input documents.
 - Keep temporary and project artifacts within the previously approved locations.
-- The user's local Windows target is `F:\Local-Office-AI`, Python 3.14.7. GitHub Actions is not the same as that installation.
-- Do not claim Ollama/Qwen, LibreHardwareMonitor, Tesseract, desktop UI or real-file acceptance was verified unless it was actually tested on the target Windows machine.
-- Never add the original administrative documents, private sample workbook, real figures or personal paths to GitHub.
+- The user's local Windows target is `F:\Local-Office-AI`, Python 3.14.7. GitHub Actions
+  is not the same as that installation.
+- Do not claim Ollama/Qwen, LibreHardwareMonitor, Tesseract, desktop UI or real-file
+  acceptance was verified unless it was actually tested on the target Windows machine.
+- Never add the original administrative documents, private sample workbook, real figures
+  or personal paths to GitHub.
 
 ## Known unresolved items
 
 - T9 / G11 / R8: output suffix validation is missing (still `xfail(strict=True)`).
 - T2 / G3 / R3 and T3 / G5 / R4 are fixed in Prompt 01A; keep their tests passing.
 - T4 passes; R5 was found unreachable in the audited code path.
-- The three real acceptance files and the private sample workbook are not in the repository; real-file validation remains local to the owner's Windows environment.
-- Prompt 01A extraction evidence is sandbox-only; Windows-target and real-file acceptance are still owner-run.
-
-**The next engineering action is Prompt 01B, and only Prompt 01B, after the owner accepts Prompt 01A.**
+- The three real acceptance files and the private sample workbook are not in the
+  repository; real-file validation remains local to the owner's Windows environment.
+- Prompt 01A and Prompt 01B evidence is sandbox-only; Windows-target and real-file
+  acceptance are still owner-run.

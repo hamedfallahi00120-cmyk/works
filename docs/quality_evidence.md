@@ -2,22 +2,25 @@
 
 This ledger records the verified handoff state for the next engineering stage.
 The preparation baseline was Phase-1a preparation only. **Prompt 01A (Data Model, Workbook
-Structure, and Metadata Extraction) is now implemented on
-`feature/prompt-01a-data-model-metadata`**, and its evidence is recorded at the end of this
-file. Prompt 01B has not started.
+Structure, and Metadata Extraction) is implemented and merged to `main` as PR #4**, and
+its evidence is recorded at the end of this file. Prompt 01B (Multi-Block Extraction,
+Table Boundaries, and Total Detection) is implemented on
+`feature/prompt-01b-multiblock-extraction`; its evidence is recorded at the end of this
+file.
 
 ## Verified repository state
 
 | Item | Value |
 | :--- | :--- |
 | Repository | `hamedfallahi00120-cmyk/works` (private) |
-| Stable base | `main` at `6df625659c97c0b7da1f78f33fa5fc37864a7580` |
+| Phase-0 base | `main` at `6df625659c97c0b7da1f78f33fa5fc37864a7580` |
+| Prompt 01A merge | PR #4; `main` at `f572c47` |
 | Preparation branch | `fix/multisource-extraction-integrity` |
 | Preparation commits | `5b20cce` (tests + ledger), `06dae62` (sanitized handover + audit), followed by CI/documentation-preflight commits |
 | Phase 0 | Completed; see `PHASE0_BASELINE_AUDIT.md` |
-| Original Prompt 01A | Implemented on `feature/prompt-01a-data-model-metadata` (evidence at end) |
-| Prompt 01B | **Not started** |
-| Production source fixes in this preparation | None |
+| Original Prompt 01A | Implemented and merged as PR #4 (evidence at end) |
+| Prompt 01B | Implemented on `feature/prompt-01b-multiblock-extraction` (evidence at end) |
+| Production source fixes in the preparation baseline | None; Prompt 01A and Prompt 01B add production source changes (below) |
 
 ## Evidence labels
 
@@ -176,3 +179,72 @@ audit profile: 23 sheets incl. مدل استخراج
 - The three original administrative files and the private reference workbook. No
   real-file acceptance is claimed; the owner runs that locally.
 - Ollama/Qwen narrative, ComfyUI, LibreHardwareMonitor, Tkinter and PySide6 runtime.
+
+## Prompt 01B evidence — multi-block extraction and total classification
+
+Full write-up: `docs/prompt_01b_technical_report.md`.
+
+### What changed
+
+- `src/local_office_ai/excel/row_classification.py` (new): one shared, context-aware row
+  classifier. It distinguishes `data`, `category`, `group_heading`, `subtotal`, `total`,
+  `difference`, `percentage`, `note`, `footer`, `title`, `header` and `blank`. A totals
+  label is matched with word boundaries; position inside the block decides subtotal vs
+  grand total. It only classifies; it never aggregates.
+- `sheet_analyzer.py`: explicit `SUBTOTAL_KEYWORDS`, `GRAND_TOTAL_KEYWORDS`,
+  `DIFFERENCE_KEYWORDS`, `PERCENT_KEYWORDS` and `NOTE_KEYWORDS`;
+  `summary_label_role()` returns `subtotal` before `total`. Multi-word totals phrases use
+  word boundaries on both ends, so the `جمع کل` phrase does not match inside `جمع کلاسی`.
+  The standalone `جمع` still marks that label as a generic total; `کلاسی` alone is not a
+  total.
+- `table_detector.py`: a totals row with real data below it is a subtotal and stays inside
+  the table; a terminal totals row is the grand total. `block_end_row` keeps comparison,
+  percentage and note rows attached to the block. Table detection resumes after the block,
+  so a following table is not swallowed. Formula-only cells count as numeric evidence.
+- `core/models.py`: `TableCandidate.block_end_row`, `subtotal_rows`, `grand_total_rows`,
+  `block_end` and `block_address`; all are serialized.
+- `structure_intelligence.py`: `SheetIntelligence.block_analyses` and
+  `block_relationships`; row roles now come from the block that owns each row, so a
+  secondary table's headers and subtotals are not mistaken for notes. `_column_totals`,
+  `_coverage`, `_audits` and period comparison skip structural rows.
+- `app/workflow.py`: every analyzable block on a sheet gets its own statistics, row roles,
+  summary rows and boundaries. Blocks are linked only when their headers or periods agree;
+  no automatic cross-block sum is performed.
+- `extraction_model.py`: each `BlockModel` now carries row roles, summary rows, block end,
+  subtotal rows and grand-total rows, plus merged ranges through the block end.
+- `data_extractor.py`: subtotal rows are excluded from normalized data, declared totals and
+  loan/obligation records.
+- `generic_report.py` / `report_writer.py`: audit-only «بلوک‌های استخراج» sheet with every
+  block's address, boundaries, measures, summary rows and block relationships. The clean
+  profile never writes it.
+- Tests: `tests/test_multiblock_extraction.py` (16 tests) covers two independent tables,
+  different header structures, a mid-table subtotal, multiple subtotals with data after
+  each, a terminal grand total, notes before and after a grand total, a section title
+  after a grand total, `کل` inside ordinary words, blank rows between blocks, repeated
+  headers, different periods, row-role distinctions including a category row with a
+  numeric code, subtotal exclusion from declared totals and from statistics, and workflow
+  traceability for every block.
+  `tests/test_output_quality.py` now asserts the audit-only block sheet is present in
+  audit output and absent from clean output.
+
+### Test evidence [SBX]
+
+Sandbox: Linux, CPython 3.13.15. Not Windows-target validation.
+
+```text
+python -m pytest tests/test_multiblock_extraction.py -o addopts="" -q
+-> 16 passed in 0.46s (exit 0)
+
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+-> 196 passed, 6 skipped, 36 deselected, 1 xfailed in 20.75s (exit 0)
+```
+
+The single `xfailed` outcome is still T9, the open output-suffix defect. The 36 deselected
+tests are the `requires_sample` set; their private reference workbook is absent and they are
+not counted as passing.
+
+### Not validated
+
+- The owner's Windows environment and the three original administrative files.
+- Real-file acceptance for multi-block workbooks; the evidence uses synthetic `.xlsx`
+  files created by the test suite.

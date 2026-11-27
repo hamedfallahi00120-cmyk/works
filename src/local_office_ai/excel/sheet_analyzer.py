@@ -25,7 +25,31 @@ from local_office_ai.excel.normalization import (
     parse_value,
 )
 
-TOTAL_KEYWORDS = ("جمع", "مجموع", "کل", "total", "sum", "grand total", "جمع کل")
+SUBTOTAL_KEYWORDS = (
+    "جمع جزء", "جمع فرعی", "جمع گروه", "جمع دسته",
+    "subtotal", "sub total", "sub-total",
+)
+GRAND_TOTAL_KEYWORDS = (
+    "جمع کل", "مجموع کل", "کل", "grand total", "total", "sum",
+)
+TOTAL_KEYWORDS = tuple(
+    dict.fromkeys((*SUBTOTAL_KEYWORDS, *GRAND_TOTAL_KEYWORDS, "جمع", "مجموع"))
+)
+
+DIFFERENCE_KEYWORDS = (
+    "مقایسه", "اختلاف", "تفاضل", "تغییر", "difference", "delta", "change", "variance",
+)
+PERCENT_KEYWORDS = ("درصد", "percentage", "percent", "ratio", "نرخ", "سهم")
+NOTE_KEYWORDS = (
+    "لازم به ذکر", "توضیح", "یادداشت", "منبع", "مأخذ", "ماخذ", "پانویس",
+    "note", "notes", "source", "footnote", "comment",
+)
+
+
+def _normalized_label(text: object) -> str:
+    if not isinstance(text, str):
+        return ""
+    return normalize_text(normalize_digits(text)).lower().strip(" :.-")
 
 
 def is_total_label(text: object) -> bool:
@@ -35,10 +59,63 @@ def is_total_label(text: object) -> bool:
     ordinary labels, not totals.  ``جمع‌کل`` still matches because the ZWNJ is
     normalized to a space before matching.
     """
-    if not isinstance(text, str):
+    value = _normalized_label(text)
+    if not value:
         return False
-    value = normalize_text(normalize_digits(text)).lower().strip(" :.-")
     return any(header_matches(value, keyword) for keyword in TOTAL_KEYWORDS)
+
+
+def is_subtotal_label(text: object) -> bool:
+    """True for explicit subtotal labels such as ``جمع گروه`` or ``subtotal``."""
+    value = _normalized_label(text)
+    if not value:
+        return False
+    return any(header_matches(value, keyword) for keyword in SUBTOTAL_KEYWORDS)
+
+
+def is_grand_total_label(text: object) -> bool:
+    """True for explicit grand-total labels; ``جمع کلاسی`` is not one."""
+    value = _normalized_label(text)
+    if not value:
+        return False
+    return any(header_matches(value, keyword) for keyword in GRAND_TOTAL_KEYWORDS)
+
+
+def is_difference_label(text: object) -> bool:
+    value = _normalized_label(text)
+    return bool(value) and any(word in value for word in DIFFERENCE_KEYWORDS)
+
+
+def is_percentage_label(text: object) -> bool:
+    value = _normalized_label(text)
+    return bool(value) and any(word in value for word in PERCENT_KEYWORDS)
+
+
+def is_note_label(text: object) -> bool:
+    value = _normalized_label(text)
+    return bool(value) and any(word in value for word in NOTE_KEYWORDS)
+
+
+def summary_label_role(text: object) -> str | None:
+    """Return the structural role implied by a summary label, if any.
+
+    ``subtotal`` is checked before ``total`` so ``جمع گروه`` never becomes a
+    grand total.  The returned strings match the ``ROW_*`` role constants.
+    """
+    value = _normalized_label(text)
+    if not value:
+        return None
+    if is_subtotal_label(value):
+        return "subtotal"
+    if is_total_label(value):
+        return "total"
+    if is_difference_label(value):
+        return "difference"
+    if is_percentage_label(value):
+        return "percentage"
+    if is_note_label(value):
+        return "note"
+    return None
 
 
 INSTITUTION_TOKENS = (
@@ -123,14 +200,17 @@ def header_matches(header: str, keyword: str) -> bool:
     """Match a header keyword as a whole word/phrase, not inside another word.
 
     ``اصل`` must match ``مبلغ اصل`` but not ``فاصله``; ``جمع`` must not match
-    ``تجمعی``.  Multi-word keywords are matched as phrases.
+    ``تجمعی``; ``جمع کل`` must not match ``جمع کلاسی``.  Multi-word keywords
+    are matched as phrases with word boundaries on both ends.
     """
-    keyword = keyword.strip()
-    if not keyword:
+    if not isinstance(header, str) or not isinstance(keyword, str):
         return False
-    if " " in keyword:
-        return keyword in header
-    return re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", header) is not None
+    text = normalize_text(normalize_digits(header)).lower()
+    key = normalize_text(normalize_digits(keyword)).lower().strip()
+    if not key:
+        return False
+    pattern = r"(?<!\w)" + r"\s+".join(re.escape(part) for part in key.split()) + r"(?!\w)"
+    return re.search(pattern, text) is not None
 
 
 NUMERIC_ROLES = {

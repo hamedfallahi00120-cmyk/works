@@ -16,17 +16,15 @@ restart the project from scratch.** The sanitized project handover is
 `docs/NEXT_AGENT_START_HERE.md`.
 
 The repository is private. The preparation baseline is on
-`fix/multisource-extraction-integrity`; the dedicated next-stage branch is
-`feature/prompt-01a-data-model-metadata` (created from the verified preparation
-branch). Never work directly on `main`.
+`fix/multisource-extraction-integrity`. Prompt 01A was merged to `main` as PR #4
+(`f572c47`). The dedicated Prompt 01B branch is
+`feature/prompt-01b-multiblock-extraction`. Never work directly on `main`.
 
 The preparation baseline is **Phase-1a preparation only**: isolated sandbox evidence,
 four focused tests (T2/T3/T4/T9), the quality ledger, the Phase 0 audit, and the
-sanitized handover. Prompt 01A is built on top of that baseline on
-`feature/prompt-01a-data-model-metadata`; the preparation branch itself still holds
-no production source fixes.
+sanitized handover. Prompt 01A is built on top of that baseline and is now merged.
 
-Prompt 01A is implemented on `feature/prompt-01a-data-model-metadata`:
+Prompt 01A is implemented and merged:
 - T2 (G3/R3) is fixed: totals keywords match on word boundaries, so `کلانتری ۱۲`,
   `تکلیف`, `جمعیت` and `کلاسه پرونده` are ordinary labels while `جمع کل` still totals.
 - T3 (G5/R4) is fixed: `سال`, `ماه` and `روز` columns whose content agrees
@@ -35,6 +33,9 @@ Prompt 01A is implemented on `feature/prompt-01a-data-model-metadata`:
 
 T2 and T3 no longer carry xfail markers; they must keep passing normally. Do not
 reintroduce substring totals matching or let temporal keys back into numeric measures.
+
+Prompt 01B is implemented on `feature/prompt-01b-multiblock-extraction`; the branch is
+local and is not merged or pushed to `main`. See the section below.
 
 ### Prompt 01A extraction model
 
@@ -70,18 +71,52 @@ Known limits: row-label period evidence is scanned for the first 300 data rows p
 flags the cap). Block boundaries, headers and columns stay complete even when cells are
 truncated.
 
+### Prompt 01B multi-block extraction and totals
+
+- `excel/row_classification.py` — the shared classifier for `data`, `category`,
+  `group_heading`, `subtotal`, `total`, `difference`, `percentage`, `note`, `footer`,
+  `title`, `header` and `blank`. It classifies only; it never aggregates.
+- `sheet_analyzer.py` — `summary_label_role()` checks subtotal before grand total;
+  `SUBTOTAL_KEYWORDS`, `GRAND_TOTAL_KEYWORDS`, `DIFFERENCE_KEYWORDS`, `PERCENT_KEYWORDS`
+  and `NOTE_KEYWORDS` are explicit. Totals phrases use word boundaries, so `کلانتری`,
+  `تکلیف`, `جمعیت`, `کلاسه پرونده` and `کلاسی` are not totals. The `جمع کل` phrase does
+  not match inside `جمع کلاسی`; the standalone `جمع` still marks that label as a generic
+  total.
+- `table_detector.py` — a totals row with real data below it is a subtotal and stays in
+  the table; a terminal totals row is the grand total. `block_end_row` keeps comparison,
+  percentage and note rows attached. Detection resumes after the block, so a following
+  table is not swallowed.
+- `core/models.py` — `TableCandidate.block_end`, `block_end_row`, `subtotal_rows`,
+  `grand_total_rows` and `block_address`, all serialized.
+- `structure_intelligence.py` / `app/workflow.py` — `block_analyses` and
+  `block_relationships`; every analyzable block gets its own statistics, row roles,
+  summary rows and boundaries. Blocks are linked only when headers or periods agree, and
+  are never summed across automatically.
+- `extraction_model.py` — each `BlockModel` carries row roles, summary rows, block end,
+  subtotal/grand-total rows and merged ranges through the block end.
+- `data_extractor.py` — subtotal rows are excluded from normalized data, declared totals
+  and loan/obligation records.
+- The audit profile writes «بلوک‌های استخراج»; the clean profile never does.
+- `tests/test_multiblock_extraction.py` (16 tests) covers the eight required Prompt 01B
+  cases plus multiple subtotals, notes around the grand total, a section title after a
+  grand total, row-role distinctions including a category row with a numeric code,
+  subtotal exclusion and workflow traceability for every block.
+  `tests/test_output_quality.py` guards the audit-only block sheet.
+
 ### Instructions for the next AI agent
 
-1. Fetch the repository and start from `feature/prompt-01a-data-model-metadata`.
+1. Fetch the repository and start from the branch that contains Prompt 01A and Prompt 01B
+   (see `docs/quality_evidence.md` for the verified state).
 2. Verify the checked-out branch, HEAD SHA and clean working tree. Do not switch to
    `main` for implementation.
 3. Read `docs/NEXT_AGENT_START_HERE.md`, `MASTER_PROJECT_HANDOVER_PUBLIC.txt`,
    `PHASE0_BASELINE_AUDIT.md`, this guide and `docs/quality_evidence.md`.
 4. Treat the Phase 0 audit and its recorded evidence as the accepted project baseline.
    Do not repeat the full audit or ask the user to resend these repository documents.
-5. Prompt 01A (**Data Model, Workbook Structure, and Metadata Extraction**) is already
-   implemented on this branch. Do not repeat it or substitute audit Phase 1a for it.
-   The next engineering action is Prompt 01B, and only after the owner accepts 01A.
+5. Prompt 01A (**Data Model, Workbook Structure, and Metadata Extraction**) and Prompt 01B
+   (**Multi-Block Extraction, Table Boundaries, and Total Detection**) are implemented on
+   this branch. Do not repeat them or substitute audit Phase 1a for them. The next
+   engineering action starts only after the owner accepts Prompt 01B.
 6. Follow the supplied shared execution contract: one dedicated branch per stage,
    focused tests, actual evidence, no merge/push to `main`, no rewrite of project
    architecture, Python as the numeric source of truth, and Qwen for narrative only.

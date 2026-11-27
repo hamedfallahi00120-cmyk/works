@@ -18,7 +18,13 @@ from local_office_ai.excel.normalization import (
     normalize_text,
     parse_value,
 )
-from local_office_ai.excel.sheet_analyzer import HeaderCandidate, SheetAnalyzer, SheetGrid, is_total_label
+from local_office_ai.excel.sheet_analyzer import (
+    HeaderCandidate,
+    SheetAnalyzer,
+    SheetGrid,
+    is_total_label,
+    summary_label_role,
+)
 
 LOGGER = get_logger(__name__)
 
@@ -96,6 +102,7 @@ class TableDetector:
                 and other.header_row == table.header_row
                 and other.first_data_row == table.first_data_row
                 and other.last_data_row == table.last_data_row
+                and other.block_end == table.block_end
                 and other.first_col <= table.first_col
                 and other.last_col >= table.last_col
                 and (other.first_col, other.last_col) != (table.first_col, table.last_col)
@@ -130,6 +137,10 @@ class TableDetector:
         data_start = band.bottom_row + 1
         last_data = data_start - 1
         blank_streak = 0
+        subtotal_rows: list[int] = []
+        grand_total_rows: list[int] = []
+        terminal_total = 0
+        block_end = 0
         for row in range(data_start, region_end + 1):
             filled = grid.row_non_empty_count(row, first_col, last_col)
             if filled == 0:
@@ -138,6 +149,18 @@ class TableDetector:
                     break
                 continue
             if self._row_is_total(grid, row, first_col, last_col):
+                if self._row_has_data_after(
+                    analyzer, grid, row, first_col, last_col, region_end
+                ):
+                    # A subtotal is part of the table, not its end.
+                    subtotal_rows.append(row)
+                    last_data = row
+                    blank_streak = 0
+                    continue
+                terminal_total = row
+                block_end = self._extend_block_end(
+                    analyzer, grid, row, first_col, last_col, region_end
+                )
                 break
             if self._row_is_repeated_header(analyzer, grid, row, first_col, last_col, region_end):
                 break
@@ -161,9 +184,17 @@ class TableDetector:
 
         if last_data < data_start:
             return None, header.row
+        if not block_end:
+            block_end = last_data
+        if terminal_total:
+            grand_total_rows = [
+                candidate
+                for candidate in range(terminal_total, block_end + 1)
+                if self._row_is_total(grid, candidate, first_col, last_col)
+            ]
         row_count = last_data - data_start + 1
         if row_count < self.settings.min_table_rows:
-            return None, last_data
+            return None, max(last_data, block_end)
 
         profiles = analyzer.profile_columns_from_band(band, data_start, last_data)
         role_warnings = analyzer.assign_roles(profiles)
@@ -201,7 +232,8 @@ class TableDetector:
             data_rows_with_values=sum(
                 1
                 for row in range(data_start, last_data + 1)
-                if any(
+                if row not in subtotal_rows
+                and any(
                     (cell := grid.get(row, column.index)) is not None
                     and not cell.is_empty
                     and parse_value(cell.value).kind is ValueKind.NUMBER
@@ -209,8 +241,11 @@ class TableDetector:
                 )
             ),
             notes=band.reasons,
+            block_end_row=block_end,
+            subtotal_rows=sorted(subtotal_rows),
+            grand_total_rows=sorted(grand_total_rows),
         )
-        return table, last_data
+        return table, block_end
 
     def _find_title(self, grid: SheetGrid, header_row: int) -> str:
         for row in range(header_row - 1, max(header_row - 4, 0), -1):
@@ -221,42 +256,145 @@ class TableDetector:
 
     @staticmethod
     def _row_is_total(grid: SheetGrid, row: int, first_col: int, last_col: int) -> bool:
-        """A total row ends a table; a KPI row that merely mentions "جمع" does not.
+        """A totals row leads with a totals label and carries a number.
 
-        A total row leads with a totals label (``جمع کل وام‌ها``) and either fills
-        fewer columns than the table or is followed by something other than
-        another row of the same shape.
+        Whether it ends the block is decided separately by
+        :meth:`_row_has_data_after`; a totals row with data below it is a
+        subtotal and stays inside the table.
         """
         first_text = TableDetector._first_text(grid, row, first_col, last_col)
         if first_text is None or not is_total_label(first_text.value):
             return False
-        filled = 0
-        has_numeric = False
         for col in range(first_col, last_col + 1):
             cell = grid.get(row, col)
-            if cell is None or cell.is_empty:
+            if cell is None:
                 continue
-            filled += 1
+            if cell.formula:
+                return True
+            if cell.is_empty:
+                continue
             if isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
-                has_numeric = True
-            elif isinstance(cell.value, str) and looks_like_number(cell.value):
-                has_numeric = True
-            elif cell.formula:
-                has_numeric = True
-        if not has_numeric:
-            return False
-        width = last_col - first_col + 1
-        if filled < width:
-            return True
-        for candidate in range(row + 1, min(row + 12, grid.max_row + 1)):
-            next_filled = grid.row_non_empty_count(candidate, first_col, last_col)
-            if next_filled == 0:
+                return True
+            if isinstance(cell.value, str) and looks_like_number(cell.value):
+                return True
+        return False
+
+    @staticmethod
+    def _row_has_numeric(grid: SheetGrid, row: int, first_col: int, last_col: int) -> bool:
+        for col in range(first_col, last_col + 1):
+            cell = grid.get(row, col)
+            if cell is None:
                 continue
-            return not (
-                next_filled >= max(2, filled - 1)
-                and not TableDetector._row_is_label_value(grid, candidate, first_col, last_col)
-            )
+            if cell.formula:
+                return True
+            if cell.is_empty:
+                continue
+            if isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
+                return True
+            if isinstance(cell.value, str) and looks_like_number(cell.value):
+                return True
+        return False
+
+    @staticmethod
+    def _row_is_text_only(grid: SheetGrid, row: int, first_col: int, last_col: int) -> bool:
+        cells = [
+            cell
+            for col in range(first_col, last_col + 1)
+            if (cell := grid.get(row, col)) is not None and (not cell.is_empty or cell.formula)
+        ]
+        if not cells:
+            return False
+        for cell in cells:
+            if not isinstance(cell.value, str):
+                return False
+            if looks_like_number(cell.value) or looks_like_date(cell.value):
+                return False
         return True
+
+    def _row_has_data_after(
+        self,
+        analyzer: SheetAnalyzer,
+        grid: SheetGrid,
+        row: int,
+        first_col: int,
+        last_col: int,
+        region_end: int,
+    ) -> bool:
+        """True when real data rows follow a totals row inside the same block."""
+        blank_streak = 0
+        for candidate in range(row + 1, region_end + 1):
+            filled = grid.row_non_empty_count(candidate, first_col, last_col)
+            if filled == 0:
+                blank_streak += 1
+                if blank_streak >= 2:
+                    return False
+                continue
+            blank_streak = 0
+            if self._row_is_repeated_header(
+                analyzer, grid, candidate, first_col, last_col, region_end
+            ):
+                return False
+            if self._row_is_lone_title(
+                grid, candidate, first_col, last_col
+            ) and self._row_starts_new_block(
+                analyzer, grid, candidate, first_col, last_col, region_end
+            ):
+                return False
+            if self._row_is_total(grid, candidate, first_col, last_col):
+                if any(
+                    self._row_is_total(grid, later, first_col, last_col)
+                    for later in range(candidate + 1, region_end + 1)
+                    if grid.row_non_empty_count(later, first_col, last_col) > 0
+                ):
+                    return True
+                continue
+            label = self._first_text(grid, candidate, first_col, last_col)
+            if label is not None and summary_label_role(label.value) in {
+                "total", "subtotal", "difference", "percentage", "note",
+            }:
+                continue
+            if self._row_is_text_only(grid, candidate, first_col, last_col):
+                continue
+            if self._row_has_numeric(grid, candidate, first_col, last_col):
+                return True
+            if filled >= 2:
+                return True
+        return False
+
+    def _extend_block_end(
+        self,
+        analyzer: SheetAnalyzer,
+        grid: SheetGrid,
+        row: int,
+        first_col: int,
+        last_col: int,
+        region_end: int,
+    ) -> int:
+        """Extend a terminal totals row over its comparison/percentage/note rows."""
+        end = row
+        for candidate in range(row + 1, region_end + 1):
+            if grid.row_non_empty_count(candidate, first_col, last_col) == 0:
+                break
+            if self._row_is_repeated_header(
+                analyzer, grid, candidate, first_col, last_col, region_end
+            ):
+                break
+            label = self._first_text(grid, candidate, first_col, last_col)
+            role = summary_label_role(label.value) if label is not None else None
+            if role == "note":
+                end = candidate
+                continue
+            if self._row_is_lone_title(
+                grid, candidate, first_col, last_col
+            ) and self._row_starts_new_block(
+                analyzer, grid, candidate, first_col, last_col, region_end
+            ):
+                break
+            if role or self._row_is_text_only(grid, candidate, first_col, last_col):
+                end = candidate
+                continue
+            break
+        return end
 
     @staticmethod
     def _first_text(grid: SheetGrid, row: int, first_col: int, last_col: int):
@@ -449,7 +587,7 @@ class TableDetector:
         for table in tables:
             if table.sheet != grid.sheet_name:
                 continue
-            covered.update(range(table.header_row, table.last_data_row + 1))
+            covered.update(range(table.header_row, table.block_end + 1))
 
         records: list[tuple[int, int, int]] = []  # (row, label_col, value_col)
         for row in range(region_start, region_end + 1):

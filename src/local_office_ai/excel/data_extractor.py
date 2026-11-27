@@ -270,7 +270,10 @@ class DataExtractor:
         totals: list[DeclaredTotal] = []
         start = table.first_data_row
         end = min(grid.max_row, table.last_data_row + TOTAL_SCAN_ROWS)
+        subtotal_rows = set(table.subtotal_rows)
         for row in range(start, end + 1):
+            if row in subtotal_rows:
+                continue
             for col in range(table.first_col, table.last_col + 1):
                 cell = grid.get(row, col)
                 if cell is None or cell.is_empty or not isinstance(cell.value, str):
@@ -358,7 +361,10 @@ class DataExtractor:
     ) -> list[dict[str, Any]]:
         """Raw + standardized value for every cell of the primary table."""
         rows: list[dict[str, Any]] = []
+        subtotal_rows = set(table.subtotal_rows)
         for row in range(table.first_data_row, min(table.last_data_row, table.first_data_row + limit - 1) + 1):
+            if row in subtotal_rows:
+                continue
             cells: list[dict[str, Any]] = []
             for column in table.columns:
                 cell = grid.get(row, column.index)
