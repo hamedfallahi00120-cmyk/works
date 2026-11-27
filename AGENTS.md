@@ -92,7 +92,7 @@ from the CI gate with `-m "not requires_sample"`; they are not counted as succes
 ## Commands
 ```bash
 python -m pip install -r requirements.txt -r requirements-documents.txt -r requirements-dev.txt
-python -m pytest tests -o addopts="" -q      # 216 tests collected (202 when PySide6 is unavailable)
+python -m pytest tests -o addopts="" -q      # collection varies by optional dependencies; record actual output
 python -m pytest tests -o addopts="" -q -m "not requires_sample"   # CI gate: reference workbook is not shipped
 python run_engine.py --file <xlsx> --no-ai --yes
 python run_engine.py --file <xlsx> --request "مقایسه 1404 با 1403 و بیشترین ماه" --no-ai
