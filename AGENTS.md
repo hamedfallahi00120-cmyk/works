@@ -34,8 +34,9 @@ Prompt 01A is implemented and merged:
 T2 and T3 no longer carry xfail markers; they must keep passing normally. Do not
 reintroduce substring totals matching or let temporal keys back into numeric measures.
 
-Prompt 01B is implemented on `feature/prompt-01b-multiblock-extraction`; the branch is
-local and is not merged or pushed to `main`. See the section below.
+Prompt 01B was merged to `main` as PR #5 (`113cc1f`). Prompt 02A is implemented on
+`feature/prompt-02a-semantic-quality`; the branch is local and is not merged or pushed to
+`main`. See the section below.
 
 ### Prompt 01A extraction model
 
@@ -103,9 +104,48 @@ truncated.
   subtotal exclusion and workflow traceability for every block.
   `tests/test_output_quality.py` guards the audit-only block sheet.
 
+### Prompt 02A semantic classification and data quality
+
+- `excel/semantic_vocabulary.py` — leaf vocabulary and value-pattern evidence for
+  identifier, measure, temporal, unit, scale, currency, negative-allowed and
+  unique-identifier decisions. A measure word in the header blocks the fixed-width and
+  digit-text code rules, so a ten-digit monetary amount stays a measure.
+- `excel/semantic_classification.py` — `SemanticRole` (`identifier`, `temporal_key`,
+  `measure`, `category`, `group`, `subtotal`, `grand_total`, `descriptive`, plus
+  `calculated` and `unknown`), `SemanticField`, `SemanticBlock`, `WorkbookSemantics` and
+  `SemanticClassifier`. Every field keeps its role, confidence, business/statistical role,
+  unit and evidence. Subtotal and grand-total rows come from `row_classification`.
+- `excel/data_quality.py` — `QualityStatus` (`PASS`/`WARNING`/`FAIL`), `QualityFinding`,
+  `QualityReport` and `DataQualityAnalyzer`. The eight required checks are
+  `missing_values`, `invalid_numeric`, `unexpected_text`, `negative_values`,
+  `duplicate_identifiers`, `inconsistent_units`, `conflicting_periods` and
+  `suspicious_values`. Quality runs on every analyzable block; findings keep the sheet,
+  block address, cell, column, count and samples, and values are never repaired.
+  Severity is requirement-based: complete measure `PASS`, some blanks `WARNING`,
+  conflicting period or broken unique identifier `FAIL`. `conflicting_periods` compares
+  scalar sources with each other and with column-header/row-label periods. A measure-word
+  header with all-text values is `unexpected_text`; `DESCRIPTIVE_HEADER_WORDS` keeps
+  «توضیحات مبلغ» descriptive.
+- `sheet_analyzer.py` — `assign_statistical_roles` uses the shared identifier evidence and
+  checks temporal keys before identifiers; formula ratios never override a key role.
+- `core/models.py` — `AnalysisResult.semantics` and `AnalysisResult.quality`, serialized
+  into the processed JSON.
+- `app/workflow.py` — semantics and quality are built after table detection and before
+  statistics.
+- The audit profile writes «نقش‌های معنایی» and «کیفیت داده (تفصیلی)» (with a block
+  column); the clean profile never does. The clean «اعتبارسنجی داده» sheet shows a compact
+  quality summary and only non-`PASS` findings.
+- `tests/test_semantic_quality.py` (23 tests) covers numeric identifiers versus measures,
+  date/year/month keys versus measures, missing values, invalid numeric content,
+  unexpected text, negative values, unit inconsistencies, conflicting periods,
+  duplicate identifiers and record numbers, administrative/vehicle/region and plural code
+  headers, English and Arabic-Indic digits, all-text measure columns, category headers
+  that mention a measure word, metadata evidence and per-block quality with real openpyxl
+  workbooks. `tests/test_output_quality.py` guards the two audit-only sheets.
+
 ### Instructions for the next AI agent
 
-1. Fetch the repository and start from the branch that contains Prompt 01A and Prompt 01B
+1. Fetch the repository and start from the branch that contains Prompt 02A
    (see `docs/quality_evidence.md` for the verified state).
 2. Verify the checked-out branch, HEAD SHA and clean working tree. Do not switch to
    `main` for implementation.
@@ -113,10 +153,11 @@ truncated.
    `PHASE0_BASELINE_AUDIT.md`, this guide and `docs/quality_evidence.md`.
 4. Treat the Phase 0 audit and its recorded evidence as the accepted project baseline.
    Do not repeat the full audit or ask the user to resend these repository documents.
-5. Prompt 01A (**Data Model, Workbook Structure, and Metadata Extraction**) and Prompt 01B
-   (**Multi-Block Extraction, Table Boundaries, and Total Detection**) are implemented on
-   this branch. Do not repeat them or substitute audit Phase 1a for them. The next
-   engineering action starts only after the owner accepts Prompt 01B.
+5. Prompt 01A (**Data Model, Workbook Structure, and Metadata Extraction**), Prompt 01B
+   (**Multi-Block Extraction, Table Boundaries, and Total Detection**) and Prompt 02A
+   (**Semantic Classification and Data Quality Validation**) are implemented. Do not
+   repeat them or substitute audit Phase 1a for them. The next engineering action starts
+   only after the owner accepts Prompt 02A.
 6. Follow the supplied shared execution contract: one dedicated branch per stage,
    focused tests, actual evidence, no merge/push to `main`, no rewrite of project
    architecture, Python as the numeric source of truth, and Qwen for narrative only.
@@ -128,7 +169,7 @@ truncated.
    the owner's Windows environment.
 
 Any reported test count must come from the actual command run in the current environment.
-The 38 tests marked `requires_sample` depend on a non-public workbook and are excluded
+The 36 tests marked `requires_sample` depend on a non-public workbook and are excluded
 from the CI gate with `-m "not requires_sample"`; they are not counted as successful.
 
 ## Layout
@@ -136,6 +177,8 @@ from the CI gate with `-m "not requires_sample"`; they are not counted as succes
 - `src/local_office_ai/excel/` — read → inspect → detect tables → normalize → profile →
   descriptive stats → frequencies → groups/crosstabs → trend/correlation → outliers →
   quality → optional loan calculations/reconciliation → report writer.
+  `semantic_vocabulary.py`, `semantic_classification.py` and `data_quality.py` classify
+  field roles and record quality findings before statistics.
   `statistical_analysis.py` is the general engine; `generic_report.py` holds the generic
   report sheets as a mixin. `validation.py` holds the 9-check quality checklist.
 - `src/local_office_ai/ai/` — Ollama client, context builder, prompts, response validator,
@@ -216,6 +259,12 @@ is such a file: 4 sheets labelled 1403/1404, 4 labelled 1404/1405, heaviest over
 
 ## Rules
 - Python is the only authority for arithmetic. Never let model output alter figures.
+- A numeric identifier (postal code, personnel number, vehicle/region code, record number,
+  year/month key) is never a measure. Use `semantic_vocabulary.identifier_evidence`; do not
+  add a header-only ID check that ignores value patterns.
+- Data-quality findings carry `PASS`/`WARNING`/`FAIL` and a sheet/cell location. Never
+  delete, repair or coerce a questionable value. The clean profile lists non-`PASS`
+  findings only; the audit profile keeps the full «کیفیت داده (تفصیلی)» sheet.
 - General statistics must stay type-aware and non-destructive: missing values and IQR
   outliers are counted/labelled, never silently deleted.
 - Do not make loan/financial columns a prerequisite for selecting the primary table or

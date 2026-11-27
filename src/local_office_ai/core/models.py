@@ -557,6 +557,10 @@ class AnalysisResult:
     # columns/cells/period evidence).  Typed as Any to avoid a models <-> excel
     # import cycle; the object implements ``to_dict``.
     extraction: Any = None
+    # Explicit semantic roles per extracted field and recorded data-quality
+    # findings.  Both are produced before statistical conclusions are drawn.
+    semantics: Any = None
+    quality: Any = None
     # Period matrix built from the periodic sheets (month x period x metric) and
     # the grounded answers to the user's Persian request.
     integration: Any = None
@@ -601,6 +605,16 @@ class AnalysisResult:
                 self.extraction.to_dict()
                 if hasattr(self.extraction, "to_dict")
                 else self.extraction
+            ),
+            "semantics": (
+                self.semantics.to_dict()
+                if hasattr(self.semantics, "to_dict")
+                else self.semantics
+            ),
+            "quality": (
+                self.quality.to_dict()
+                if hasattr(self.quality, "to_dict")
+                else self.quality
             ),
             "validation": [
                 item.to_dict() if hasattr(item, "to_dict") else item for item in self.validation

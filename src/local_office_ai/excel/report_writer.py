@@ -177,6 +177,8 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
         "limitations": lambda self, wb, context: self._limitations(wb, context),
         "structure": lambda self, wb, context: self._structure(wb, context.analysis),
         "extraction": lambda self, wb, context: self._extraction_model(wb, context.analysis),
+        "semantics": lambda self, wb, context: self._semantics_sheet(wb, context.analysis),
+        "quality_details": lambda self, wb, context: self._quality_details_sheet(wb, context.analysis),
     }
 
     def _plan(self, context: ReportContext, profile: str) -> list[str]:
@@ -227,6 +229,10 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
             audit_tail.extend(["period_comparison", "reconciliation_sheet"])
         if getattr(analysis, "extraction", None) is not None:
             audit_tail.append("extraction")
+        if getattr(analysis, "semantics", None) is not None:
+            audit_tail.append("semantics")
+        if getattr(analysis, "quality", None) is not None:
+            audit_tail.append("quality_details")
         audit_tail.extend(
             [
                 "normalized",
@@ -936,6 +942,50 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
             ws.cell(5, 1, "اعتبارسنجی برای این تحلیل اجرا نشد.")
         else:
             self._body(ws, 5, row - 1, 1, 5)
+
+        quality = getattr(analysis, "quality", None)
+        if quality is not None:
+            from local_office_ai.excel.data_quality import QUALITY_STATUS_FA
+
+            row += 1
+            self._section(ws, row, "طبقه‌بندی معنایی و کیفیت داده (PASS/WARNING/FAIL)", 5)
+            row += 1
+            counts = quality.counts()
+            self._value_cell(ws, row, 1, "وضعیت کلی کیفیت داده")
+            self._value_cell(ws, row, 2, QUALITY_STATUS_FA.get(quality.status, quality.status.value))
+            self._fill(
+                ws.cell(row, 2),
+                {"PASS": GREEN, "WARNING": YELLOW, "FAIL": RED}.get(quality.status.value, GREY),
+            )
+            self._value_cell(
+                ws,
+                row,
+                3,
+                f"PASS {counts.get('PASS', 0)} / WARNING {counts.get('WARNING', 0)} / FAIL {counts.get('FAIL', 0)}",
+            )
+            ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=5)
+            row += 1
+            wrote_finding = False
+            for finding in quality.findings:
+                if finding.status.value == "PASS":
+                    continue
+                wrote_finding = True
+                self._value_cell(ws, row, 1, finding.title)
+                self._value_cell(ws, row, 2, finding.scope)
+                self._value_cell(
+                    ws, row, 3, QUALITY_STATUS_FA.get(finding.status, finding.status.value)
+                )
+                self._value_cell(ws, row, 4, finding.count)
+                self._value_cell(ws, row, 5, finding.message)
+                self._fill(
+                    ws.cell(row, 3),
+                    {"PASS": GREEN, "WARNING": YELLOW, "FAIL": RED}.get(finding.status.value, GREY),
+                )
+                row += 1
+            if not wrote_finding:
+                self._value_cell(ws, row, 1, "یافته‌ای خارج از PASS ثبت نشد.")
+                row += 1
+
         ws.freeze_panes = "A5"
         self._widths(ws, {"A": 34, "B": 26, "C": 12, "D": 12, "E": 60})
         self._print_setup(ws)

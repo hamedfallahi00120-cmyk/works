@@ -28,6 +28,10 @@ from local_office_ai.excel.structure_intelligence import (
 
 FONT_NAME = "Tahoma"
 DARK = "1F1F1F"
+GREEN = "E2EFDA"
+YELLOW = "FFF2CC"
+RED = "FCE4D6"
+GREY = "F2F2F2"
 TYPE_FA = {
     "number": "عددی",
     "date": "تاریخ",
@@ -895,6 +899,139 @@ class GenericReportMixin:
             row += 1
 
         self._widths(ws, {"A": 28, "B": 30, "C": 20, "D": 20, "E": 20, "F": 20})
+        self._print_setup(ws)
+
+    # ------------------------------------------------------------------ #
+    def _semantics_sheet(self, wb, analysis: AnalysisResult) -> None:
+        """Audit-only view of every field's explicit semantic role and evidence."""
+        from local_office_ai.excel.semantic_classification import SEMANTIC_ROLE_FA
+
+        semantics = getattr(analysis, "semantics", None)
+        ws = wb.create_sheet("نقش‌های معنایی")
+        self._rtl(ws)
+        self._title(ws, "نقش معنایی هر فیلد، شاهد تصمیم و نقش جمع‌های میانی/کل", 9)
+        row = 3
+        if semantics is None:
+            self._value_cell(ws, row, 1, "طبقه‌بندی معنایی برای این فایل ساخته نشد.")
+            self._print_setup(ws)
+            return
+        counts = semantics.role_counts()
+        summary = "، ".join(
+            f"{SEMANTIC_ROLE_FA.get(role, role)}: {count}" for role, count in sorted(counts.items())
+        )
+        self._value_cell(ws, row, 1, "شمارش نقش‌ها")
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+        self._value_cell(ws, row, 2, summary or "—")
+        row += 2
+
+        for block in semantics.blocks:
+            self._section(
+                ws,
+                row,
+                f"برگه «{block.sheet}» — بلوک {block.block_id} — {block.address} — {len(block.columns)} ستون",
+                9,
+            )
+            row += 1
+            self._header(ws, row, [
+                "ستون", "عنوان", "نقش معنایی", "اطمینان", "نقش تجاری", "نقش آماری",
+                "واحد", "شاهد تصمیم", "یادداشت",
+            ])
+            header_row = row
+            row += 1
+            for column in block.columns:
+                values = [
+                    column.letter,
+                    column.header or "—",
+                    SEMANTIC_ROLE_FA.get(column.role, column.role.value),
+                    f"{column.confidence:.0%}",
+                    column.business_role,
+                    column.statistical_role,
+                    column.unit or "—",
+                    "؛ ".join(column.evidence) or "—",
+                    "؛ ".join(column.notes) or "—",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                row += 1
+            if row > header_row + 1:
+                self._body(ws, header_row + 1, row - 1, 1, 9)
+            for item in block.rows:
+                ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=9)
+                self._value_cell(
+                    ws,
+                    row,
+                    1,
+                    f"• ردیف {item.row} نقش «{SEMANTIC_ROLE_FA.get(item.role, item.role.value)}» دارد"
+                    + (f" — {item.label}" if item.label else ""),
+                )
+                row += 1
+            row += 1
+        self._widths(ws, {
+            "A": 8, "B": 30, "C": 18, "D": 10, "E": 14, "F": 18,
+            "G": 12, "H": 62, "I": 40,
+        })
+        ws.freeze_panes = "A5"
+        self._print_setup(ws)
+
+    # ------------------------------------------------------------------ #
+    def _quality_details_sheet(self, wb, analysis: AnalysisResult) -> None:
+        """Audit-only view of the PASS/WARNING/FAIL quality findings."""
+        from local_office_ai.excel.data_quality import QUALITY_STATUS_FA
+
+        report = getattr(analysis, "quality", None)
+        ws = wb.create_sheet("کیفیت داده (تفصیلی)")
+        self._rtl(ws)
+        self._title(ws, "یافته‌های کیفیت داده با وضعیت PASS/WARNING/FAIL و محل دقیق", 10)
+        row = 3
+        if report is None:
+            self._value_cell(ws, row, 1, "یافته کیفیت داده برای این فایل ثبت نشد.")
+            self._print_setup(ws)
+            return
+        counts = report.counts()
+        self._value_cell(ws, row, 1, "وضعیت کلی")
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=10)
+        self._value_cell(
+            ws,
+            row,
+            2,
+            f"{QUALITY_STATUS_FA.get(report.status, report.status.value)} — "
+            f"PASS {counts.get('PASS', 0)}، WARNING {counts.get('WARNING', 0)}، FAIL {counts.get('FAIL', 0)}",
+        )
+        row += 2
+        self._header(ws, row, [
+            "وضعیت", "بررسی", "پیام", "دامنه", "برگه", "بلوک", "سلول", "ستون",
+            "تعداد", "نمونه/شاهد",
+        ])
+        header_row = row
+        row += 1
+        colors = {"PASS": GREEN, "WARNING": YELLOW, "FAIL": RED}
+        for finding in report.findings:
+            samples = list(finding.samples)
+            evidence = list(finding.evidence)
+            combined = "؛ ".join([*samples, *evidence])
+            values = [
+                QUALITY_STATUS_FA.get(finding.status, finding.status.value),
+                finding.title,
+                finding.message,
+                finding.scope or "—",
+                finding.sheet or "—",
+                finding.block or "—",
+                finding.address or "—",
+                finding.column or "—",
+                finding.count,
+                combined or "—",
+            ]
+            for offset, value in enumerate(values, start=1):
+                self._value_cell(ws, row, offset, value)
+            self._fill(ws.cell(row, 1), colors.get(finding.status.value, GREY))
+            row += 1
+        self._body(ws, header_row + 1, row - 1, 1, 10)
+        ws.auto_filter.ref = f"A{header_row}:J{max(row - 1, header_row + 1)}"
+        self._widths(ws, {
+            "A": 12, "B": 30, "C": 56, "D": 30, "E": 16, "F": 12,
+            "G": 10, "H": 8, "I": 8, "J": 48,
+        })
+        ws.freeze_panes = f"A{header_row + 1}"
         self._print_setup(ws)
 
     # ------------------------------------------------------------------ #

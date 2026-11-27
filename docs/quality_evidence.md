@@ -79,7 +79,7 @@ The three failures were exactly T2, T3, and T9. Dependency installation and open
 - The user's actual Windows environment `F:\Local-Office-AI` and its existing `venv`.
 - Ollama/Qwen, LibreHardwareMonitor, PySide6 desktop runtime and Tesseract in the user's installation.
 - The three original administrative files and real-file acceptance. They are intentionally absent from GitHub and must remain local/read-only.
-- The private source workbook used by `requires_sample` tests. The 38 marked tests are excluded from the CI gate, not silently treated as passed.
+- The private source workbook used by `requires_sample` tests. The 36 marked tests are excluded from the CI gate, not silently treated as passed.
 
 ## Preparation CI update
 
@@ -248,3 +248,73 @@ not counted as passing.
 - The owner's Windows environment and the three original administrative files.
 - Real-file acceptance for multi-block workbooks; the evidence uses synthetic `.xlsx`
   files created by the test suite.
+
+## Prompt 02A — Semantic classification and data quality (branch evidence)
+
+Branch `feature/prompt-02a-semantic-quality`, based on `main` at `113cc1f` (the
+merge of Prompt 01B). No cross-source aggregation was added.
+
+### Implementation
+
+- `excel/semantic_vocabulary.py` (new): shared identifier, measure, temporal,
+  unit, scale, currency, negative-allowed and unique-identifier vocabularies plus
+  value-pattern evidence. A measure word in the header blocks the fixed-width and
+  digit-text code rules, so wide monetary amounts stay measures.
+- `excel/semantic_classification.py` (new): `SemanticRole` for `identifier`,
+  `temporal_key`, `measure`, `category`, `group`, `subtotal`, `grand_total` and
+  `descriptive` (plus `calculated` and `unknown`), `SemanticField`,
+  `SemanticBlock`, `WorkbookSemantics` and `SemanticClassifier`. Each field keeps
+  its role, confidence, business/statistical role, unit and evidence. Subtotal
+  and grand-total rows come from the shared `row_classification` module.
+- `excel/data_quality.py` (new): `QualityStatus` (`PASS`/`WARNING`/`FAIL`),
+  `QualityFinding`, `QualityReport` and `DataQualityAnalyzer`. The eight required
+  checks are `missing_values`, `invalid_numeric`, `unexpected_text`,
+  `negative_values`, `duplicate_identifiers`, `inconsistent_units`,
+  `conflicting_periods` and `suspicious_values`. Quality runs on every analyzable
+  block, and each finding keeps its sheet, block address, cell, column, count and
+  samples; values are never repaired. `conflicting_periods` compares scalar
+  sources with each other and with column-header/row-label periods.
+  `duplicate_identifiers` treats record/case numbers as strict. A measure-word
+  header with all-text values is reported as `unexpected_text`, while
+  `DESCRIPTIVE_HEADER_WORDS` keeps a header such as «توضیحات مبلغ» descriptive.
+- `sheet_analyzer.py`: `assign_statistical_roles` now uses the shared identifier
+  evidence and checks temporal keys before identifiers. Formula ratios no longer
+  override identifier or temporal roles.
+- `core/models.py`: `AnalysisResult.semantics` and `AnalysisResult.quality`,
+  serialized in `to_dict()`.
+- `app/workflow.py`: semantics and quality are built after table detection and
+  before statistics.
+- `generic_report.py` / `report_writer.py`: audit-only «نقش‌های معنایی» and
+  «کیفیت داده (تفصیلی)» sheets (the latter includes a block column); the clean
+  «اعتبارسنجی داده» sheet gains a compact quality summary and lists non-`PASS`
+  findings only.
+- `tests/test_semantic_quality.py` (new, 23 tests) covers the eight required
+  cases with real openpyxl workbooks, plus administrative/vehicle/region/record and
+  plural identifiers, English and Arabic-Indic digits, all-text measure columns,
+  category headers that mention a measure word, metadata evidence, cross-source period
+  conflicts, quality on every block, role coverage, row roles, evidence and serialization.
+  `tests/test_output_quality.py` guards the audit-only sheets.
+
+### Test evidence [SBX]
+
+Sandbox: Linux, CPython 3.13.15. Not Windows-target validation. Runtime,
+document and development dependencies were installed from the repository
+requirements files before this run.
+
+```text
+python -m pytest tests/test_semantic_quality.py -o addopts="" -q
+-> 23 passed in 1.35s (exit 0)
+
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+-> 223 passed, 2 skipped, 36 deselected, 1 xfailed in 25.58s (exit 0)
+```
+
+The single `xfailed` outcome is still T9, the open output-suffix defect. The 36
+deselected tests are the `requires_sample` set; their private reference workbook
+is absent and they are not counted as passing.
+
+### Not validated
+
+- The owner's Windows environment and the three original administrative files.
+- Real-file acceptance for the new semantic and quality checks; the evidence uses
+  synthetic `.xlsx` files created by the test suite.
