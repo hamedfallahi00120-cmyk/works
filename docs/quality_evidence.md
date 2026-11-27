@@ -1,69 +1,84 @@
 # Quality evidence ledger — Local Office AI
 
-Running evidence for the ten-stage remediation. Every row is a real command result,
-not a claim. `[SBX]` = executed in the isolated Linux sandbox; `[WIN]` = must be run on
-the Windows target `F:\Local-Office-AI` and is not yet executed.
+This ledger records the verified handoff state for the next engineering stage.
+**The work on this branch is Phase-1a preparation only; it is NOT completion of the agreed Prompt 01A.**
+The original Prompt 01A (Data Model, Workbook Structure, and Metadata Extraction) has not started.
 
-| Stage | Branch | Scope | Evidence |
-| :--- | :--- | :--- | :--- |
-| 00 | `main` | read-only baseline audit | `PHASE0_BASELINE_AUDIT.md`; commit `6df6256` |
-| 01A | `fix/multisource-extraction-integrity` | sandbox env + real baseline + defect tests | this file, §01A |
+## Verified repository state
 
-## Environment contract
+| Item | Value |
+| :--- | :--- |
+| Repository | `hamedfallahi00120-cmyk/works` (private) |
+| Stable base | `main` at `6df625659c97c0b7da1f78f33fa5fc37864a7580` |
+| Preparation branch | `fix/multisource-extraction-integrity` |
+| Preparation commits | `5b20cce` (tests + ledger), `06dae62` (sanitized handover + audit), followed by CI/documentation-preflight commits |
+| Phase 0 | Completed; see `PHASE0_BASELINE_AUDIT.md` |
+| Original Prompt 01A | **Not started** |
+| Prompt 01B | **Not started** |
+| Production source fixes in this preparation | None |
 
-- Sandbox venv: `/tmp/loa-sandbox-venv` (Python 3.13.15), isolated; **never** the Windows
-  `venv`, never system Python. Installed from `requirements.txt` + `requirements-documents.txt`
-  + `requirements-dev.txt`.
-- Windows target (`F:\Local-Office-AI`, Python 3.14.7, Ollama `qwen3.5:9b`,
-  LibreHardwareMonitor) is **not reachable here**. Nothing below is a Windows runtime result.
-- Real-file acceptance (`5ماهه تصادفات.xlsx`, `شهريار 5 ماهه 1405.xlsx`, `دیییییی.docx`)
-  is reserved for the Windows target and is not executed.
+## Evidence labels
 
-## Stage 01A — sandbox baseline and red defect tests
+- `[SBX]`: isolated Linux sandbox evidence, Python 3.13.15. Not Windows target validation.
+- `[GHA-WIN]`: GitHub-hosted Windows Actions runner. This is CI evidence, not the user's local installation.
+- `[WIN-TARGET]`: the actual user environment at `F:\Local-Office-AI`, Python 3.14.7. Not accessed or validated from this session.
 
-### Baseline (unchanged code, before adding tests) `[SBX]`
+## Phase-1a preparation evidence (before original Prompt 01A)
+
+### Isolated sandbox baseline [SBX]
+
+The sandbox was created at `/tmp/loa-sandbox-venv` using Python 3.13.15. Dependencies were installed there only. The Windows virtual environment, system Python, and user project dependencies were not touched.
+
+Recorded before the four targeted tests were added:
 
 ```text
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 166 passed, 2 skipped, 36 deselected in 20.76s   (exit 0)
+-> 166 passed, 2 skipped, 36 deselected (exit 0)
 ```
 
-`--collect-only` -> **202 tests collected**. This contradicts the docs: `README.md`/`AGENTS.md`
-say 216, `docs/MODERN_UI.md` says ۲۰۷. Real collected count is 202. (G12/C1.)
+The original report also recorded `--collect-only -> 202`. These are historical sandbox figures; do not use them as a current cross-platform test-count promise. The full collection differs with optional PySide6 availability and the four later test additions.
 
-### New tests (added in 01A)
+### Targeted tests
 
-| ID | Test | Guards | Status on 01A code | Evidence |
+| ID | Test | Guard | Defect state before implementation | Current CI policy |
 | :--- | :--- | :--- | :--- | :--- |
-| T2 | `test_total_label_needs_a_word_boundary` | G3 / R3 | **FAIL (red)** — `is_total_label("کلانتری ۱۲") is True` | `test_sheet_structure.py:169` |
-| T3 | `test_year_month_day_columns_are_not_measures` | G5 / R4 | **FAIL (red)** — `سال` role is `NUMERIC_MEASURE`, expected `TEMPORAL_KEY` | `test_structure_intelligence.py:267` |
-| T4 | `test_code_columns_stay_identifiers` | G5 / R5 | **PASS (green guard)** — R5 not reproducible, see note | `test_structure_intelligence.py` |
-| T9 | `test_output_suffix_is_validated` | G11 / R8 | **FAIL (red)** — xlsx written under `report.docx`, exit 0 | `test_cli.py:153` |
+| T2 | `test_total_label_needs_a_word_boundary` | G3 / R3 | Known defect: substring matching classifies labels such as `کلانتری ۱۲` as totals | `xfail(strict=True)` |
+| T3 | `test_year_month_day_columns_are_not_measures` | G5 / R4 | Known defect: `سال/ماه/روز` can be treated as numeric measures | `xfail(strict=True)` |
+| T4 | `test_code_columns_stay_identifiers` | G5 / R5 | Passes; R5 was not reproducible and must not be treated as a confirmed defect | Normal passing test |
+| T9 | `test_output_suffix_is_validated` | G11 / R8 | Known defect: XLSX content may be written under a `.docx` suffix | `xfail(strict=True)` |
 
-### Full gate after adding tests `[SBX]`
+The strict expected-failure markers are test-baseline bookkeeping, not defect fixes. They keep the baseline CI green while preserving executable regression tests. When a later prompt fixes one of these defects, that test must pass normally and its xfail marker must be removed; strict xfail intentionally makes an unexpected pass fail CI.
+
+### First GitHub Actions run [GHA-WIN] — historical failure
+
+Run `45984936491`, commit `06dae62`, Windows Server 2025, Python `3.14.10`:
 
 ```text
-python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 3 failed, 167 passed, 2 skipped, 36 deselected in 18.38s   (exit 1, expected)
+3 failed, 178 passed, 1 skipped, 38 deselected
 ```
 
-The 3 failures are exactly T2, T3, T9 and are the intended red baseline; T4 passes.
-01B must turn T2/T3/T9 green without breaking the other 167.
+The three failures were exactly T2, T3, and T9. Dependency installation and openpyxl import succeeded. Artifact upload also failed because the repository's GitHub Actions artifact storage quota was exhausted. This prompted two preparation-only CI changes:
+- pin CI to the target Python `3.14.7`;
+- make test-result artifact upload best-effort (`continue-on-error: true`), because artifact storage is diagnostic and must not decide test correctness.
 
-### Corrections to the Phase-0 audit (verified against code at `6df6256`)
+**A post-change CI run is required before calling the preparation branch green.** Its result is recorded in the update section below.
 
-1. **R5 is unreachable.** `sheet_analyzer.py` skips duplicate-role demotion whenever
-   `parent_header`/`sub_header`/`period` is set; `parent_header` is always populated for a
-   named column (`profile_columns_from_band`). Two code columns therefore both stay
-   `IDENTIFIER`. T4 is kept as a regression guard, not a red test.
-2. **ZIP drift is 7 files, not 6.** Byte-diff of `Local-Office-AI_UI_UX_Refined.zip`
-   (prefix stripped): 123 identical, 7 differ — `.gitignore`, `AGENTS.md`, `README.md`,
-   `pytest.ini`, `requirements.txt`, `tests/conftest.py`, `tests/test_packaging.py`.
-   `src/` is identical.
-3. **Collected test count is 202**, not 216/207.
+## Phase 0 audit corrections
 
-### Pending (Windows target, `[WIN]`)
+1. R5 was not reproducible: the duplicate-role demotion path is unreachable for the profiled named columns because the parent header is already populated. T4 remains a passing guard, not a fabricated red test.
+2. ZIP drift is **7 files**, not 6; `src/` is byte-identical. The differing files include `.gitignore`.
+3. Test counts are environment- and revision-dependent. The audit's 209 is a count of test functions, not the same thing as collected pytest items. The initial audit did not have pytest/PySide6 dependencies installed, so the next agent must use actual current pytest output rather than assume a static count.
 
-- Re-run `-m "not requires_sample"` in `F:\Local-Office-AI\venv` and compare.
-- Acceptance on the three real files (`--audit`, `--check-structure`), input `sha256`
-  unchanged.
+## Explicitly not validated
+
+- The user's actual Windows environment `F:\Local-Office-AI` and its existing `venv`.
+- Ollama/Qwen, LibreHardwareMonitor, PySide6 desktop runtime and Tesseract in the user's installation.
+- The three original administrative files and real-file acceptance. They are intentionally absent from GitHub and must remain local/read-only.
+- The private source workbook used by `requires_sample` tests. The 38 marked tests are excluded from the CI gate, not silently treated as passed.
+
+## Preparation CI update
+
+- CI configuration and strict-xfail bookkeeping have been committed to the preparation branch.
+- Post-change GitHub Actions result: **pending verification**.
+- Prompt 01A readiness: **pending successful post-change CI and handoff-branch creation**.
+
