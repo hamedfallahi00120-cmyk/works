@@ -28,7 +28,7 @@ the end of this file.
 | Prompt 02A | Implemented and merged as PR #6 (evidence at end) |
 | Prompt 02B | Implemented and merged as PR #7 (evidence at end) |
 | Prompt 03A | Implemented on `feature/prompt-03a-semantic-source-matching`; PR #8 open (evidence at end) |
-| Prompt 03B | Implemented on its dedicated branch (evidence at end) |
+| Prompt 03B | Implemented and merged as PR #9; `main` at `18fb3d4` (evidence at end) |
 | Prompt 04A | Implemented on `feature/prompt-04a-output-format-docx-template` (evidence at end) |
 | Production source fixes in the preparation baseline | None; Prompts 01A, 01B, 02A, 02B and 03A add production source changes (below) |
 

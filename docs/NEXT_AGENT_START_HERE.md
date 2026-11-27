@@ -10,7 +10,7 @@
 - Prompt 02B was merged to `main` as PR #7; `main` is at `891b662`.
 - Dedicated Prompt 03A branch: `feature/prompt-03a-semantic-source-matching`; PR #8 is open
   and is not merged to `main`.
-- Prompt 03B is implemented on its own dedicated branch.
+- Prompt 03B was merged to `main` as PR #9; `main` is at `18fb3d4`.
 - Dedicated Prompt 04A branch: `feature/prompt-04a-output-format-docx-template`, created
   from `main` at `18fb3d4`; it is not merged to `main` yet.
 - The three original administrative source files and the private sample workbook are
