@@ -52,10 +52,10 @@ python -m pytest tests/test_semantic_matching.py -o addopts="" -q
 -> 23 passed in 2.11s
 
 python -m pytest tests/test_report_output_formats.py -o addopts="" -q
--> 18 passed in 0.94s
+-> 19 passed in 1.06s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 319 passed, 2 skipped, 36 deselected in 37.12s
+-> 320 passed, 2 skipped, 36 deselected in 36.95s
 ```
 
 The 36 deselected tests are `requires_sample`; their private workbook is absent and they

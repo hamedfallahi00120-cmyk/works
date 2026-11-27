@@ -654,10 +654,10 @@ Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
 
 ```text
 python -m pytest tests/test_report_output_formats.py -o addopts="" -q
--> 18 passed in 0.94s (exit 0)
+-> 19 passed in 1.06s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 319 passed, 2 skipped, 36 deselected in 36.85s (exit 0)
+-> 320 passed, 2 skipped, 36 deselected in 36.95s (exit 0)
 ```
 
 `tests/test_report_output_formats.py` uses real openpyxl workbooks and real python-docx

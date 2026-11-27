@@ -372,7 +372,7 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
 - `excel/report_writer.py`, `excel/mixed_report_writer.py` and
   `FolderReportWriter.build_folder` validate `.xlsx` at the writer boundary, so a
   mismatched suffix cannot reach a workbook writer.
-- `tests/test_report_output_formats.py` (18 tests) uses real openpyxl workbooks and real
+- `tests/test_report_output_formats.py` (19 tests) uses real openpyxl workbooks and real
   python-docx templates: format tokens/suffixes, explicit/suffix/request/default routing,
   conflicts, extension validation, PDF rejection, template inspection (layout, margins,
   styles, headings, tables, headers/footers, numbering, RTL), placeholder detection across

@@ -6,7 +6,9 @@ actual Excel/DOCX writers.  Nothing is mocked.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from docx import Document
@@ -344,6 +346,30 @@ def test_template_figures_never_become_report_data(settings, make_workbook, docx
     assert template.is_data_source is False
     assert template.has_static_figures is True
     assert any(HISTORICAL_FIGURE in item.text for item in template.static_numeric_literals)
+
+
+def test_report_content_preserves_small_decimal_values():
+    analysis = SimpleNamespace(
+        meta=SimpleNamespace(path="ratio.xlsx"),
+        primary_table=None,
+        integration=None,
+        calculations=[
+            SimpleNamespace(
+                name="ratio",
+                value=Decimal("0.004"),
+                unit="",
+                sources=[],
+            )
+        ],
+        generic=None,
+        request_answers=[],
+        anomalies=[],
+        warnings=[],
+    )
+
+    content = ReportContent.from_analysis(analysis)
+
+    assert content.placeholder_values()["metric.ratio"] == "0.004"
 
 
 def test_missing_and_unsupported_templates_are_rejected(tmp_path):

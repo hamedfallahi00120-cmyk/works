@@ -25,11 +25,11 @@ SUPPORTED_PROFILES = {"clean", "audit"}
 def _decimal_text(value: Any) -> str:
     if value is None:
         return "در دسترس نبود"
-    if isinstance(value, Decimal):
-        text = f"{value:,.2f}".rstrip("0").rstrip(".")
-        return text or "0"
-    if isinstance(value, float):
-        text = f"{value:,.2f}".rstrip("0").rstrip(".")
+    if isinstance(value, (Decimal, int, float)) and not isinstance(value, bool):
+        number = value if isinstance(value, Decimal) else Decimal(str(value))
+        text = f"{number:,f}"
+        if "." in text:
+            text = text.rstrip("0").rstrip(".")
         return text or "0"
     return str(value)
 
