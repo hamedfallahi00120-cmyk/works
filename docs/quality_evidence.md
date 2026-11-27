@@ -79,6 +79,12 @@ The three failures were exactly T2, T3, and T9. Dependency installation and open
 ## Preparation CI update
 
 - CI configuration and strict-xfail bookkeeping have been committed to the preparation branch.
-- Post-change GitHub Actions result: **pending verification**.
-- Prompt 01A readiness: **pending successful post-change CI and handoff-branch creation**.
+- **Run 11 passed:** [GitHub Actions run 45987467733](https://github.com/hamedfallahi00120-cmyk/works/actions/runs/45987467733), validated commit `7721c7232c5b1016400e1676f4b6c82045a93160`.
+- Runner: Windows Server 2025, CPython **3.14.7**, pytest 9.2.0.
+- Targeted gate result: **178 passed, 1 skipped, 38 deselected, 3 xfailed** in 68.34s; exit code 0.
+- Sample-dependent collection: **38/220** tests carry `requires_sample`; they were collected but intentionally not executed because their private reference workbook is absent.
+- Artifact upload was attempted but GitHub reported that the Actions artifact storage quota is full. Because this diagnostic upload is configured as best-effort, the job and workflow completed successfully. The test result above is from the runner log, not the artifact.
+- The three `xfail(strict=True)` outcomes are the known defects listed above, not fixes. The CI gate is green while accurately retaining those unresolved issues.
+- The next-stage branch `feature/prompt-01a-data-model-metadata` was created and verified at the same prepared baseline.
+- **Prompt 01A readiness: repository and handoff prepared.** The next AI may start the exact original Prompt 01A on the dedicated branch without repeating Phase 0. This CI run validates the code/tests/configuration at the stated commit; it does not validate the owner's local Windows installation, Ollama/Qwen, LHM, or the real administrative files.
 
