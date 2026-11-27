@@ -447,6 +447,39 @@ def _parse_ordinal_range(text: str, source: str) -> NormalizedPeriod | None:
     return None
 
 
+def _named_months_range(
+    year: int,
+    months: list[tuple[str, int]],
+    calendar_name: str,
+    source: str,
+) -> NormalizedPeriod | None:
+    """A consecutive run of named months such as ``مرداد و شهریور 1403``."""
+    numbers = sorted({month for _name, month in months})
+    if len(numbers) < 2:
+        return None
+    if numbers != list(range(numbers[0], numbers[-1] + 1)):
+        return None
+    start = _month_bounds(year, numbers[0], calendar_name)
+    end = _month_bounds(year, numbers[-1], calendar_name)
+    if start is None or end is None:
+        return None
+    first_name = next(name for name, month in months if month == numbers[0])
+    last_name = next(name for name, month in months if month == numbers[-1])
+    if calendar_name == CALENDAR_GREGORIAN:
+        first_name, last_name = first_name.title(), last_name.title()
+    return _period(
+        label=f"{first_name}–{last_name} {year}",
+        calendar_name=calendar_name,
+        granularity=GRANULARITY_RANGE,
+        bounds=(start[0], end[1]),
+        year=year,
+        source=source,
+        evidence=(
+            f"بازه چندماهه از «{first_name}» تا «{last_name}» با سال {year}"
+        ),
+    )
+
+
 def _parse_named_month(text: str, source: str) -> NormalizedPeriod | None:
     year_match = _FOUR_DIGIT_YEAR.search(text)
     if year_match is None:
@@ -458,6 +491,8 @@ def _parse_named_month(text: str, source: str) -> NormalizedPeriod | None:
 
     months = _months_in(text)
     if months and calendar_name == CALENDAR_JALALI:
+        if len(months) > 1:
+            return _named_months_range(year, months, CALENDAR_JALALI, source)
         name, month = months[0]
         bounds = _jalali_month_bounds(year, month)
         if bounds:
@@ -474,6 +509,8 @@ def _parse_named_month(text: str, source: str) -> NormalizedPeriod | None:
 
     gregorian = _gregorian_months_in(text)
     if gregorian:
+        if len(gregorian) > 1:
+            return _named_months_range(year, gregorian, CALENDAR_GREGORIAN, source)
         name, month = gregorian[0]
         bounds = _gregorian_month_bounds(year, month)
         if bounds:
@@ -749,14 +786,20 @@ def parse_period(text: Any, *, source: str = "") -> NormalizedPeriod | None:
     if not cleaned:
         return None
 
-    for parser in (
-        _parse_range,
-        _parse_ordinal_range,
-        _parse_named_month,
-        _parse_numeric,
-        _parse_embedded_numeric,
-        _parse_embedded_year,
-    ):
+    for parser in (_parse_range, _parse_ordinal_range, _parse_named_month):
+        period = parser(cleaned, source)
+        if period is not None:
+            return period
+
+    # A multi-month phrase without an ordinal (``سه ماهه 1403``) or several
+    # non-consecutive month names (``مرداد و مهر 1403``) does not identify one
+    # period.  Never fall back to the bare year.
+    if re.search(r"سه\s*ماهه|شش\s*ماهه|نیمه|نیم\s*سال|فصل|quarter", cleaned, re.IGNORECASE):
+        return None
+    if len(_months_in(cleaned)) > 1 or len(_gregorian_months_in(cleaned)) > 1:
+        return None
+
+    for parser in (_parse_numeric, _parse_embedded_numeric, _parse_embedded_year):
         period = parser(cleaned, source)
         if period is not None:
             return period

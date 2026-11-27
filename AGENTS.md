@@ -194,27 +194,38 @@ truncated.
 
 - `excel/period_alignment.py` — `NormalizedPeriod`, `parse_period`, `parse_periods` and
   `compare_period_sets`. It parses Jalali/Gregorian years, months, days, numeric dates,
-  named months, quarters, halves, seasons, ranges (including compact
+  named months, consecutive multi-month periods (`مرداد و شهریور 1403`,
+  `January and February 2024`), quarters, halves, seasons, ranges (including compact
   `1403/01/01-1403/03/31` and `1403-1404`) and dates embedded in headers
-  (`تعداد پرونده 1403/04`). Persian/Arabic-Indic digits are normalized first. A bare
-  year counts only inside the administrative bands (1178–1699 Jalali, 1700–2200
-  Gregorian); a long free-text cell, `ردیف 12` and `کد 1234` are not periods. Comparison returns an
-  explained relation (`equivalent`, `contains`, `within`, `overlapping`, `incompatible`,
-  `unknown`) with real overlap dates. No period is invented.
+  (`تعداد پرونده 1403/04`). Persian/Arabic-Indic digits are normalized first. An exact
+  bare year counts inside the converter band (1178–1633 Jalali, 1700–2200 Gregorian);
+  a bare year embedded in a title is limited to 1300–1500 Jalali / 1900–2100
+  Gregorian. A long free-text cell, `ردیف 12` and `کد 1234` are not periods. A
+  multi-month phrase without an ordinal (`سه ماهه 1403`) or non-consecutive month
+  names (`مرداد و مهر 1403`) yields no period, never a bare year. Comparison returns
+  an explained relation (`equivalent`, `contains`, `within`, `overlapping`,
+  `incompatible`, `unknown`) with real overlap dates. No period is invented.
 - `excel/semantic_matching.py` — controlled cross-source matching. `SourceField` keeps
   source file, sheet, block, column letter, original header, normalized label, canonical
-  tokens, role, unit (dimension/canonical/scale), periods, title, samples, shared
-  identifier columns and evidence. Label evidence separates content words from measure
-  words and uses a small cross-language administrative vocabulary plus configured
-  synonyms. Units are compared by dimension and scale; periods by date range. A pair is
-  `matched` when label/role/unit identity agree; `comparable` is true only when units are
-  equal (or both absent) and periods are equivalent. Each field and decision carries an
-  explicit period status (`detected`, `not_detected`, `conflicting`, `partial`). The same
+  tokens, role, unit (dimension/canonical/scale), periods, title, row labels, samples,
+  shared identifier columns and identifier values, and evidence. Label evidence
+  separates content words from measure words and uses a small cross-language
+  administrative vocabulary plus configured synonyms. Aggregation words are
+  identity-bearing: `مبلغ` is not matched to `مبلغ کل` or `میانگین مبلغ`. Units are
+  compared by dimension and scale; periods by date range. A pair is `matched` when
+  label/role/unit identity agree; `comparable` is true only when units are equal (or
+  both absent) and periods are equivalent. Each field and decision carries an explicit
+  period status (`detected`, `not_detected`, `conflicting`, `partial`). The same
   indicator in different periods stays mapped with `comparable=False`; a missing period
-  is `probable`, never `matched`; two close candidates are `ambiguous` with every
-  candidate kept; similar names for different indicators are `rejected` with the reason.
-  It never aggregates.
-- `semantic_classification.py` — `SemanticField` carries the column period and samples.
+  is `probable`, never `matched`; a category/identifier pair with at least 80% sampled
+  value overlap is `probable` with `comparable=False`; two close candidates are
+  `ambiguous` with every candidate kept; similar names for different indicators are
+  `rejected` with the reason. Row-label overlap, shared identifier values and
+  table-title similarity are supporting evidence, so reordered tables with an extra
+  descriptive column can still align. It never aggregates.
+- `semantic_classification.py` — `SemanticField` carries the column period and samples;
+  `SemanticBlock` carries row labels from the primary identifier/category column
+  (descriptive columns such as `شرح` are skipped).
   `semantic_vocabulary.identifier_evidence` does not treat a weak identifier word as an
   identifier when a measure word is present, so `تعداد پرونده` is a count measure while
   `شماره پرونده` remains an identifier.
@@ -227,11 +238,13 @@ truncated.
 - `report_writer.py` / `generic_report.py` — the audit profile writes
   «تطبیق معنایی منابع» with Persian period/unit labels and period status; the clean
   profile never writes it.
-- `tests/test_semantic_matching.py` (20 tests) covers the seven required cases with real
-  openpyxl workbooks, category-value overlap, shared identifier evidence, conflicting
-  periods, month titles under a year-only sheet name (including two month blocks in one
-  sheet), multi-period sets that require full coverage, the period parser,
-  serialization, audit-only output and cross-file folder matching.
+- `tests/test_semantic_matching.py` (22 tests) covers the seven required cases with real
+  openpyxl workbooks, category-value overlap (probable, not definitive), shared
+  identifier values, aggregation-label rejection, reordered tables with an extra
+  descriptive column, conflicting periods, month titles under a year-only sheet name
+  (including two month blocks in one sheet), multi-month named periods, multi-period
+  sets that require full coverage, the period parser, serialization, audit-only output
+  and cross-file folder matching.
   `tests/test_output_quality.py` guards the audit-only sheet.
 
 Known limits: the matching vocabulary is deliberately small; an unknown domain synonym

@@ -110,6 +110,12 @@ _MEASURE_TOKENS = {
     "credit", "profit", "loss", "payment", "income", "expense", "budget",
 }
 
+# A counting word may be present on one side and absent on the other without
+# changing the indicator (``تعداد پرونده`` / ``پرونده``).  Aggregation words
+# (``کل``, ``جمع``, ``میانگین``, ``درصد``) change the meaning and must agree.
+_INTERCHANGEABLE_MEASURE_TOKENS = {"count", "quantity"}
+_AGGREGATION_MEASURE_TOKENS = {"total", "average", "percent", "rate", "share"}
+
 # A deliberately small cross-language administrative vocabulary.  It is an aid,
 # not a translation engine: only canonical-token equality can make a match, and
 # unit/period evidence must still agree.
@@ -131,6 +137,7 @@ _DEFAULT_ALIASES = {
     "values": "amount",
     "جمع": "total",
     "مجموع": "total",
+    "کل": "total",
     "total": "total",
     "totals": "total",
     "sum": "total",
@@ -239,6 +246,7 @@ _UNIT_PATTERNS: tuple[tuple[str, str, str], ...] = (
     ("تومان", "currency", "TOMAN"),
     ("تومانی", "currency", "TOMAN"),
     ("تومن", "currency", "TOMAN"),
+    ("همت", "currency", "TOMAN"),
     ("درهم", "currency", "AED"),
     ("دلار", "currency", "USD"),
     ("یورو", "currency", "EUR"),
@@ -500,6 +508,8 @@ class SourceField:
     letter: str = ""
     samples: list[str] = field(default_factory=list)
     block_identifiers: list[str] = field(default_factory=list)
+    identifier_values: dict[str, list[str]] = field(default_factory=dict)
+    row_labels: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
     period_conflict: bool = False
 
@@ -522,6 +532,15 @@ class SourceField:
     @property
     def period_labels(self) -> list[str]:
         return [period.label for period in self.periods]
+
+    @property
+    def display_label(self) -> str:
+        periods = "، ".join(self.period_labels) or "—"
+        unit = self.unit.label() if self.unit.known else "—"
+        return (
+            f"{self.source}/{self.sheet}/{self.block}/«{self.header}» "
+            f"[دوره: {periods}; واحد: {unit}]"
+        )
 
     @property
     def period_status(self) -> str:
@@ -549,6 +568,11 @@ class SourceField:
             "table_title": self.table_title,
             "samples": list(self.samples[:8]),
             "block_identifiers": list(self.block_identifiers),
+            "identifier_values": {
+                header: list(values[:8])
+                for header, values in self.identifier_values.items()
+            },
+            "row_labels": list(self.row_labels[:20]),
             "evidence": list(self.evidence),
             "period_conflict": self.period_conflict,
         }
@@ -563,12 +587,20 @@ class MatchCandidate:
     reason: str = ""
     comparable: bool = False
 
+    @property
+    def period_status(self) -> str:
+        return self.field.period_status
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "field": self.field.to_dict(),
             "status": self.status.value,
             "status_label": STATUS_FA.get(self.status, self.status.value),
             "score": round(self.score, 4),
+            "period_status": self.period_status,
+            "period_status_label": PERIOD_STATUS_FA.get(
+                self.period_status, self.period_status
+            ),
             "evidence": list(self.evidence),
             "reason": self.reason,
             "comparable": self.comparable,
@@ -602,7 +634,7 @@ class FieldMatch:
 
     @property
     def member_labels(self) -> list[str]:
-        return [f"{item.source}/{item.sheet}/{item.header}" for item in self.members]
+        return [item.display_label for item in self.members]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -826,6 +858,20 @@ def collect_source_fields(
             if getattr(field, "role", None) is SemanticRole.IDENTIFIER
             and getattr(field, "header", "")
         ]
+        block_identifier_values: dict[str, list[str]] = {}
+        for identifier in getattr(block, "columns", []) or []:
+            if (
+                getattr(identifier, "role", None) is not SemanticRole.IDENTIFIER
+                or not getattr(identifier, "header", "")
+            ):
+                continue
+            values = [
+                str(value)
+                for value in (getattr(identifier, "samples", []) or [])
+                if str(value).strip()
+            ]
+            if values:
+                block_identifier_values[str(identifier.header)] = values[:20]
         for field in getattr(block, "columns", []) or []:
             kind = _ROLE_KIND.get(getattr(field, "role", None), KIND_OTHER)
             if kind == KIND_OTHER:
@@ -858,6 +904,8 @@ def collect_source_fields(
                     letter=str(getattr(field, "letter", "") or ""),
                     samples=[str(sample) for sample in (getattr(field, "samples", []) or [])][:20],
                     block_identifiers=block_identifiers,
+                    identifier_values=block_identifier_values,
+                    row_labels=list(getattr(block, "row_labels", []) or [])[:50],
                     evidence=list(getattr(field, "evidence", []) or []),
                     period_conflict=period_conflict,
                 )
@@ -883,16 +931,25 @@ def _label_evidence(left: SourceField, right: SourceField) -> tuple[float, str]:
             return 1.0, "مفهوم اصلی و واژه اندازه‌گیری یکسان است."
         if (
             not left_measure
-            or not right_measure
-            or left_measure <= right_measure
-            or right_measure <= left_measure
+            and right_measure <= _INTERCHANGEABLE_MEASURE_TOKENS
+        ) or (
+            not right_measure
+            and left_measure <= _INTERCHANGEABLE_MEASURE_TOKENS
         ):
             return 0.95, (
-                "مفهوم اصلی یکسان است و تفاوت فقط در واژه اندازه‌گیری "
+                "مفهوم اصلی یکسان است و تفاوت فقط در واژه شمارش "
                 "(مثل «تعداد») است."
             )
-        return 0.6, "مفهوم اصلی یکسان است اما واژه اندازه‌گیری متفاوت است."
+        return 0.6, (
+            "مفهوم اصلی یکسان است اما یکی از دو برچسب واژه تجمیع/میانگین "
+            "یا واحد اندازه‌گیری متفاوت دارد."
+        )
     if not left_content and not right_content:
+        if left_measure != right_measure:
+            return 0.3, (
+                "هر دو برچسب فقط از واژه اندازه‌گیری/تجمیع ساخته شده‌اند و "
+                "این واژه‌ها یکسان نیستند."
+            )
         return 0.3, "هر دو برچسب فقط از واژه عمومی اندازه‌گیری ساخته شده‌اند."
     if left_content and right_content and (
         left_content < right_content or right_content < left_content
@@ -923,6 +980,25 @@ def _value_overlap(left: SourceField, right: SourceField) -> float | None:
     right_values = {
         normalize_text(normalize_digits(str(value))).lower().strip()
         for value in right.samples
+        if str(value).strip()
+    }
+    if len(left_values) < 2 or len(right_values) < 2:
+        return None
+    union = left_values | right_values
+    if not union:
+        return None
+    return len(left_values & right_values) / len(union)
+
+
+def _set_overlap(left: Iterable[str], right: Iterable[str]) -> float | None:
+    left_values = {
+        normalize_text(normalize_digits(str(value))).lower().strip()
+        for value in left
+        if str(value).strip()
+    }
+    right_values = {
+        normalize_text(normalize_digits(str(value))).lower().strip()
+        for value in right
         if str(value).strip()
     }
     if len(left_values) < 2 or len(right_values) < 2:
@@ -1207,6 +1283,7 @@ class SemanticMatcher:
 
         evidence = [label_reason]
         overlap = _value_overlap(first, second)
+        value_supported = False
         if overlap is not None:
             if overlap >= 0.5:
                 evidence.append(f"هم‌پوشانی مقادیر دسته‌ای {overlap:.0%}؛ شاهد کمکی.")
@@ -1219,24 +1296,66 @@ class SemanticMatcher:
                 and first.kind in {KIND_CATEGORY, KIND_IDENTIFIER}
             ):
                 # Identical values are real evidence, but names alone cannot prove
-                # the two columns mean the same thing.  Keep it as an ambiguity.
+                # the two columns mean the same thing.  Keep it probable, never
+                # a definitive match.
                 label_score = 0.5
+                value_supported = True
                 evidence.append(
                     "نام‌ها یکسان نیستند اما مقادیر نمونه هم‌پوشانی بالایی دارند؛ "
                     "برای تطبیق قطعی به تأیید نیاز است."
                 )
         shared_identifiers = set(first.block_identifiers) & set(second.block_identifiers)
-        if shared_identifiers:
-            evidence.append(
-                "هر دو بلوک ستون شناسه مشترک دارند: "
-                + "، ".join(sorted(shared_identifiers)[:3])
+        for identifier in sorted(shared_identifiers)[:3]:
+            identifier_overlap = _set_overlap(
+                first.identifier_values.get(identifier, []),
+                second.identifier_values.get(identifier, []),
             )
+            if identifier_overlap is not None:
+                evidence.append(
+                    f"ستون شناسه مشترک «{identifier}» با هم‌پوشانی مقادیر "
+                    f"{identifier_overlap:.0%}."
+                )
+            else:
+                evidence.append(f"هر دو بلوک ستون شناسه مشترک دارند: {identifier}")
+
+        row_overlap = _set_overlap(first.row_labels, second.row_labels)
+        if row_overlap is not None:
+            if row_overlap >= 0.5:
+                evidence.append(
+                    f"هم‌پوشانی برچسب‌های سطر {row_overlap:.0%}؛ ساختار سطرها "
+                    "هم‌خوان است."
+                )
+            else:
+                evidence.append(
+                    f"برچسب‌های سطر فقط {row_overlap:.0%} هم‌پوشانی دارند."
+                )
+
+        if first.table_title and second.table_title:
+            title_similarity = _string_similarity(
+                normalize_text(normalize_digits(first.table_title)).lower(),
+                normalize_text(normalize_digits(second.table_title)).lower(),
+            )
+            if title_similarity >= 0.6:
+                evidence.append(
+                    f"عنوان جدول‌ها هم‌خوان است (شباهت {title_similarity:.0%})."
+                )
         if period_conflict:
             evidence.append(
                 "برای دست‌کم یکی از دو فیلد دوره گزارش‌دهی قطعی نیست یا بیش از یک دوره ناسازگار ثبت شده است."
             )
 
-        similar = label_score >= self.candidate_threshold or string_similarity >= 0.7
+        aggregation_difference = (
+            first.measure_tokens != second.measure_tokens
+            and bool(
+                (first.measure_tokens | second.measure_tokens)
+                & _AGGREGATION_MEASURE_TOKENS
+            )
+        )
+        similar = (
+            label_score >= self.candidate_threshold
+            or string_similarity >= 0.7
+            or aggregation_difference
+        )
         # Cross-role pairs are only interesting when the names are close; every
         # other cross-role pair would flood the report with structural noise.
         if not role_compatible and not similar:
@@ -1265,6 +1384,32 @@ class SemanticMatcher:
                 reason=" ".join(reasons),
                 candidate=False,
                 similar=similar,
+            )
+
+        if value_supported:
+            return _PairEvaluation(
+                left=left,
+                right=right,
+                status=MatchStatus.PROBABLE,
+                score=min(0.85, 0.55 + 0.3 * (overlap or 0.0)),
+                label_score=label_score,
+                label_reason=label_reason,
+                unit=unit,
+                period=period,
+                role_compatible=role_compatible,
+                evidence=evidence,
+                reason=(
+                    "نام‌ها یکسان نیستند اما مقادیر نمونه هم‌پوشانی بالایی دارند؛ "
+                    "این تطبیق احتمالی است و مقدارها بدون تأیید مقایسه نمی‌شوند."
+                    + (
+                        " " + period.explanation
+                        if period.relation != "equivalent"
+                        else ""
+                    )
+                ),
+                candidate=True,
+                similar=True,
+                comparable=False,
             )
 
         if label_score >= self.matched_threshold:
@@ -1430,7 +1575,11 @@ class SemanticMatcher:
             if text and text not in explanations:
                 explanations.append(text)
         comparable = all(evaluation.comparable for evaluation in evaluations)
-        reason = "برچسب نرمال‌شده یکسان است."
+        pair_reasons: list[str] = []
+        for evaluation in evaluations:
+            if evaluation.reason and evaluation.reason not in pair_reasons:
+                pair_reasons.append(evaluation.reason)
+        reason = " ".join(pair_reasons[:2]) or "برچسب نرمال‌شده سازگار است."
         if not comparable:
             reason += (
                 " مقدارهای اعضا با هم قابل مقایسه نیستند؛ دوره گزارش‌دهی یا واحد "
@@ -1444,7 +1593,7 @@ class SemanticMatcher:
                 ),
                 "",
             )
-            if detail:
+            if detail and detail not in reason:
                 reason += " " + detail
         return FieldMatch(
             match_id=f"M{number}",

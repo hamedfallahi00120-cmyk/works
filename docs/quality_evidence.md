@@ -432,27 +432,36 @@ PR #8 open, not merged to `main`. Base: `main` at `891b662` (PR #7 merged).
 - `excel/period_alignment.py` (new): `NormalizedPeriod` and `parse_period` /
   `parse_periods`. It recognizes Jalali and Gregorian years, months, days, numeric
   dates (`1403/04`, `1403/04/15`, `2024-07-05`), named months (`تیر 1403`,
-  `July 2024`), quarters, halves, seasons, ranges (`از ... تا`, `..`, ` - `, compact
-  `1403/01/01-1403/03/31` and `1403-1404`) and embedded dates in headers
-  (`تعداد پرونده 1403/04`). Persian/Arabic-Indic digits are normalized first. A bare
-  year in a short title is a year period only inside the administrative bands
-  (1178–1699 Jalali, 1700–2200 Gregorian); a long free-text cell
-  and a code such as `کد 1234` are not periods. `ردیف 12` is not a period. The matcher consumes the finalized
-  `SheetIntelligence.periods`, so a month block title under a year-only sheet name
-  becomes `مرداد 1404`; if only a bare year remains for a month title, the period is
-  `not_detected` rather than equated with another month or invented. `compare_period_sets` returns an
-  explained relationship (`equivalent`, `contains`, `within`, `overlapping`,
-  `incompatible`, `unknown`) with the real overlap dates.
+  `July 2024`), consecutive multi-month periods (`مرداد و شهریور 1403`,
+  `January and February 2024`), quarters, halves, seasons, explicit ranges
+  (`از ... تا`, `..`, ` - `), compact ranges (`1403/01/01-1403/03/31`,
+  `1403-1404`) and embedded dates in headers (`تعداد پرونده 1403/04`).
+  Persian/Arabic-Indic digits are normalized first. An exact bare year is accepted
+  inside the converter band (1178–1633 Jalali, 1700–2200 Gregorian); a bare year
+  embedded in a short title is limited to 1300–1500 Jalali / 1900–2100 Gregorian.
+  A long free-text cell and a code such as `کد 1234` are not periods; `ردیف 12` is
+  not a period. A multi-month phrase without an ordinal (`سه ماهه 1403`) or several
+  non-consecutive month names (`مرداد و مهر 1403`) yields no period, never a bare
+  year. The matcher consumes the finalized `SheetIntelligence.periods`, so a month
+  block title under a year-only sheet name becomes `مرداد 1404`; if only a bare year
+  remains for a month title, the period is `not_detected` rather than equated with
+  another month or invented. `compare_period_sets` returns an explained relationship
+  (`equivalent`, `contains`, `within`, `overlapping`, `incompatible`, `unknown`)
+  with the real overlap dates.
 - `excel/semantic_matching.py` (new): controlled cross-source matching. Every
   `SourceField` keeps source file, sheet, block, column letter, original header,
   normalized label, canonical tokens, role, unit (dimension/canonical/scale), periods,
-  table title, samples, shared identifier columns and evidence. Label evidence uses
-  canonical tokens (spelling, ZWNJ, Persian plural forms, a small cross-language
-  administrative vocabulary, configured synonyms) and separates content words from
-  measure words, so `تعداد پرونده` matches `Case Count` but `تعداد پرونده ورودی` is
-  not `تعداد پرونده خروجی`. Units are compared by dimension and scale; `ریال` versus
-  `نفر` is rejected, `میلیون ریال` versus `ریال` is the same indicator but not directly
-  comparable. Periods are compared as date ranges, never as strings.
+  table title, row labels, samples, shared identifier columns and identifier values,
+  and evidence. Label evidence uses canonical tokens (spelling, ZWNJ, Persian plural
+  forms, a small cross-language administrative vocabulary, configured synonyms) and
+  separates content words from measure words, so `تعداد پرونده` matches `Case Count`
+  but `تعداد پرونده ورودی` is not `تعداد پرونده خروجی`. Aggregation words are
+  identity-bearing: `مبلغ` is not matched to `مبلغ کل` or `میانگین مبلغ`. Units are
+  compared by dimension and scale; `ریال` versus `نفر` is rejected, `میلیون ریال`
+  versus `ریال` is the same indicator but not directly comparable. Periods are
+  compared as date ranges, never as strings. Row-label overlap, shared identifier
+  values and table-title similarity are recorded as supporting evidence, so a
+  reordered table with an extra descriptive column can still align on the same rows.
 - Identity and value comparability are separate: a field pair is `matched` when the
   normalized label, role and unit identity agree; `comparable` is true only when units
   are equal (or both absent) and periods are equivalent. Every field and decision also
@@ -460,12 +469,16 @@ PR #8 open, not merged to `main`. Base: `main` at `891b662` (PR #7 merged).
   `partial`), so an absent period is reported rather than invented. The same indicator in two
   different periods stays mapped with `comparable=False`; a missing period yields
   `probable`, not `matched`. Two or more plausible candidates produce one `ambiguous`
-  record that keeps every candidate. Similar names that describe different indicators
-  are `rejected` with the reason. The engine never aggregates.
+  record that keeps every candidate. A category or identifier pair whose names differ
+  but whose sampled values overlap at least 80% is `probable` with `comparable=False`,
+  never a definitive match. Similar names that describe different indicators are
+  `rejected` with the reason. The engine never aggregates.
 - `semantic_classification.py`: `SemanticField` now carries the column period and
-  sample values. `semantic_vocabulary.identifier_evidence` no longer treats a weak
-  identifier word as an identifier when a measure word is present, so `تعداد پرونده`
-  stays a count measure while `شماره پرونده` stays an identifier.
+  sample values; `SemanticBlock` carries row labels taken from the primary
+  identifier/category column (descriptive columns such as `شرح` are skipped).
+  `semantic_vocabulary.identifier_evidence` no longer treats a weak identifier word
+  as an identifier when a measure word is present, so `تعداد پرونده` stays a count
+  measure while `شماره پرونده` stays an identifier.
 - `app/workflow.py` / `core/models.py`: `AnalysisResult.semantic_matching` is built
   after semantics, quality and structure intelligence (so sheet-level period evidence is
   available) and serialized into the processed JSON.
@@ -476,14 +489,15 @@ PR #8 open, not merged to `main`. Base: `main` at `891b662` (PR #7 merged).
   «تطبیق معنایی منابع» with matched/probable/ambiguous/rejected decisions, Persian
   period/unit labels, period status, comparability and reasons; the clean profile never
   writes it.
-- `tests/test_semantic_matching.py` (new, 20 tests) covers the seven required cases
+- `tests/test_semantic_matching.py` (new, 22 tests) covers the seven required cases
   with real openpyxl workbooks: different names, similar names for different
   indicators, different period formats, Persian/Gregorian date references, different
-  unit dimensions, unit scale, missing periods, ambiguity, category-value overlap,
-  shared identifier evidence, conflicting periods in one field, month titles under a
-  year-only sheet name (including two month blocks in one sheet), multi-period sets
-  that require full coverage, the period parser, the audit-only report sheet,
-  serialization and cross-file folder matching.
+  unit dimensions, unit scale, missing periods, ambiguity, category-value overlap
+  (now a probable match), shared identifier values, aggregation-label rejection,
+  reordered tables with an extra descriptive column, conflicting periods in one field,
+  month titles under a year-only sheet name (including two month blocks in one sheet),
+  multi-month named periods, multi-period sets that require full coverage, the period
+  parser, the audit-only report sheet, serialization and cross-file folder matching.
 - `tests/test_output_quality.py` now guards «تطبیق معنایی منابع» as audit-only.
 
 ### Test evidence [SBX]
@@ -492,10 +506,10 @@ Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
 
 ```text
 python -m pytest tests/test_semantic_matching.py -o addopts="" -q
--> 20 passed in 1.90s (exit 0)
+-> 22 passed in 2.05s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 275 passed, 6 skipped, 36 deselected, 1 xfailed in 30.81s (exit 0)
+-> 277 passed, 6 skipped, 36 deselected, 1 xfailed in 31.19s (exit 0)
 ```
 
 The single `xfailed` outcome remains T9 (output suffix validation). The 36 deselected

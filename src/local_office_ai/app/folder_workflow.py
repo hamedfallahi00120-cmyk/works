@@ -583,10 +583,7 @@ class FolderReportWriter(ExcelReportWriter):
             header_row = row
             row += 1
             for item in items:
-                members = "؛ ".join(
-                    f"{member.source}/{member.sheet}/{member.block}/«{member.header}»"
-                    for member in item.members
-                )
+                members = "؛ ".join(member.display_label for member in item.members)
                 original_labels = " / ".join(
                     dict.fromkeys(member.header for member in item.members)
                 )

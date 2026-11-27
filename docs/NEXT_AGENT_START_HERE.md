@@ -27,22 +27,22 @@ Prompt 02A was merged to `main` as PR #6. Prompt 02B — Statistical Reconciliat
 Calculation Integrity — was merged to `main` as PR #7. **Prompt 03A — Semantic Source
 Matching and Period Alignment — is implemented on
 `feature/prompt-03a-semantic-source-matching`.** It adds `period_alignment.py` (Jalali
-and Gregorian periods, ranges and compatibility) and `semantic_matching.py` (controlled
-field matching with label, role, unit, period, identifier and value evidence). Identity
-and value comparability are separate decisions; missing or conflicting periods and
-ambiguous candidates are reported, never guessed. The audit profile writes
-«تطبیق معنایی منابع», and the folder report writes «تطبیق شاخص‌ها بین منابع». The
-branch is local and is not merged or pushed to `main`. See `docs/quality_evidence.md`
-for the implementation record.
+and Gregorian periods, multi-month ranges and compatibility) and `semantic_matching.py`
+(controlled field matching with label, role, unit, period, row-label, identifier and
+value evidence). Identity and value comparability are separate decisions; missing or
+conflicting periods and ambiguous candidates are reported, never guessed. The audit
+profile writes «تطبیق معنایی منابع», and the folder report writes «تطبیق شاخص‌ها بین
+منابع». The branch is pushed and PR #8 is open; it is not merged to `main`. See
+`docs/quality_evidence.md` for the implementation record.
 
 Recorded sandbox evidence (Linux, CPython 3.13.15, pytest 9.2.0):
 
 ```text
 python -m pytest tests/test_semantic_matching.py -o addopts="" -q
--> 20 passed in 1.90s
+-> 22 passed in 2.05s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 275 passed, 6 skipped, 36 deselected, 1 xfailed in 30.81s
+-> 277 passed, 6 skipped, 36 deselected, 1 xfailed in 31.19s
 ```
 
 The `xfailed` result is T9. The 36 deselected tests are `requires_sample`; their private

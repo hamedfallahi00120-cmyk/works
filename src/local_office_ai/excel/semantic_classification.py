@@ -33,6 +33,10 @@ from local_office_ai.excel.normalization import (
     parse_value,
 )
 from local_office_ai.excel.row_classification import (
+    ROW_CATEGORY,
+    ROW_DATA,
+    ROW_DATA_MISSING,
+    ROW_GROUP_HEADING,
     ROW_SUBTOTAL,
     ROW_TOTAL,
     classify_block_rows,
@@ -90,6 +94,17 @@ DATA_ROLE_TO_SEMANTIC = {
 MEASURE_ROLES = {SemanticRole.MEASURE, SemanticRole.CALCULATED}
 KEY_ROLES = {SemanticRole.IDENTIFIER, SemanticRole.TEMPORAL_KEY}
 UNIT_HEADER_WORDS = ("واحد", "unit", "measure")
+
+# Descriptive text columns are not row dimensions.  The generic dimension words
+# (نوع/دسته/گروه/طبقه) are deliberately not in this list.
+_ROW_LABEL_SKIP_WORDS = (
+    "شرح", "توضیح", "توضیحات", "ملاحظات", "یادداشت", "آدرس", "نام", "عنوان",
+    "علت", "اقدام", "پیوست", "description", "comment", "note", "notes",
+)
+
+
+def _is_descriptive_row_header(header: object) -> bool:
+    return any(matches_word(header, word) for word in _ROW_LABEL_SKIP_WORDS)
 
 
 @dataclass
@@ -168,6 +183,7 @@ class SemanticBlock:
     columns: list[SemanticField]
     rows: list[SemanticRow] = field(default_factory=list)
     periods: list[str] = field(default_factory=list)
+    row_labels: list[str] = field(default_factory=list)
 
     @property
     def measures(self) -> list[SemanticField]:
@@ -190,6 +206,7 @@ class SemanticBlock:
             "kind": self.kind,
             "title": self.title,
             "address": self.address,
+            "row_labels": list(self.row_labels),
             "columns": [column.to_dict() for column in self.columns],
             "rows": [row.to_dict() for row in self.rows],
             "periods": list(self.periods),
@@ -301,6 +318,29 @@ class SemanticClassifier:
                 if column.period
             )
         )
+        row_candidates = [
+            column
+            for column in fields
+            if column.role is SemanticRole.IDENTIFIER
+            or column.role in {SemanticRole.CATEGORY, SemanticRole.GROUP}
+        ]
+        preferred = [
+            column
+            for column in row_candidates
+            if not _is_descriptive_row_header(column.header)
+        ]
+        anchor = (preferred or row_candidates or [None])[0]
+        row_labels = list(anchor.samples) if anchor is not None else []
+        if not row_labels:
+            row_labels = list(
+                dict.fromkeys(
+                    record.label
+                    for record in row_records
+                    if record.label
+                    and record.role
+                    in {ROW_DATA, ROW_DATA_MISSING, ROW_CATEGORY, ROW_GROUP_HEADING}
+                )
+            )
         return SemanticBlock(
             block_id=block_id or f"{table.sheet}#{table.address}",
             sheet=table.sheet,
@@ -310,6 +350,7 @@ class SemanticClassifier:
             columns=fields,
             rows=rows,
             periods=periods,
+            row_labels=row_labels,
         )
 
     # ------------------------------------------------------------------ #

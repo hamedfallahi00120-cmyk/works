@@ -113,6 +113,41 @@ def test_similar_names_for_different_indicators_are_rejected(settings, make_work
     assert "یکسان نیستند" in rejections[0].reason
 
 
+def test_aggregation_labels_are_not_matched_to_the_base_measure(settings, make_workbook):
+    path = make_workbook(
+        "aggregation-labels.xlsx",
+        {
+            "پایه": [
+                ["گزارش تیر 1403"],
+                [],
+                ["شعبه", "مبلغ"],
+                ["الف", 1000],
+                ["ب", 2000],
+            ],
+            "کل": [
+                ["گزارش تیر 1403"],
+                [],
+                ["شعبه", "مبلغ کل"],
+                ["الف", 3000],
+                ["ب", 3000],
+            ],
+            "میانگین": [
+                ["گزارش تیر 1403"],
+                [],
+                ["شعبه", "میانگین مبلغ"],
+                ["الف", 1500],
+                ["ب", 2000],
+            ],
+        },
+    )
+    report = _analyse(settings, path).semantic_matching
+    assert not _matches_with(report, "مبلغ")
+    assert not _matches_with(report, "مبلغ کل")
+    assert not _matches_with(report, "میانگین مبلغ")
+    assert _rejection(report, "مبلغ", "مبلغ کل")
+    assert _rejection(report, "مبلغ", "میانگین مبلغ")
+
+
 # --------------------------------------------------------------------------- #
 # 3. Different period formats
 # --------------------------------------------------------------------------- #
@@ -345,7 +380,7 @@ def test_ambiguous_matches_keep_all_candidates(settings, make_workbook):
 # --------------------------------------------------------------------------- #
 # Equivalent categories and shared identifiers
 # --------------------------------------------------------------------------- #
-def test_equivalent_categories_with_different_names_stay_ambiguous(settings, make_workbook):
+def test_equivalent_categories_with_different_names_become_probable(settings, make_workbook):
     values = ["سرقت", "سرقت", "ضرب", "ضرب", "جعل", "جعل"]
     path = make_workbook(
         "category-values.xlsx",
@@ -372,16 +407,44 @@ def test_equivalent_categories_with_different_names_stay_ambiguous(settings, mak
     )
     records = [
         item
-        for item in report.ambiguities
-        if {item.members[0].header}
-        | {candidate.field.header for candidate in item.candidates}
-        == pair_headers
+        for item in report.probable
+        if {member.header for member in item.members} == pair_headers
     ]
-    assert records, "the value-overlap category pair was not reported as ambiguous"
-    evidence = " ".join(
-        text for candidate in records[0].candidates for text in candidate.evidence
+    assert records, "the value-overlap category pair was not reported as probable"
+    assert records[0].comparable is False
+    assert "هم‌پوشانی" in " ".join(records[0].evidence)
+
+
+def test_reordered_and_extra_columns_still_match_indicators(settings, make_workbook):
+    path = make_workbook(
+        "different-structures.xlsx",
+        {
+            "اول": [
+                ["گزارش تیر 1403"],
+                [],
+                ["شعبه", "تعداد پرونده", "مبلغ"],
+                ["الف", 10, 100],
+                ["ب", 20, 200],
+            ],
+            "دوم": [
+                ["گزارش 1403/04"],
+                [],
+                ["شرح", "شعبه", "مبلغ", "تعداد پرونده"],
+                ["x", "الف", 110, 12],
+                ["y", "ب", 210, 22],
+            ],
+        },
     )
-    assert "هم‌پوشانی" in evidence
+    report = _analyse(settings, path).semantic_matching
+    for header in ("تعداد پرونده", "مبلغ"):
+        matches = _matches_with(report, header)
+        assert len(matches) == 1, header
+        match = matches[0]
+        assert match.comparable is True, header
+        assert {member.sheet for member in match.members} == {"اول", "دوم"}, header
+        evidence = " ".join(match.evidence)
+        assert "هم‌پوشانی برچسب‌های سطر" in evidence, header
+        assert "عنوان جدول‌ها هم‌خوان" in evidence, header
 
 
 def test_shared_identifier_column_is_recorded_as_evidence(settings, make_workbook):
@@ -413,7 +476,9 @@ def test_shared_identifier_column_is_recorded_as_evidence(settings, make_workboo
         if {member.header for member in match.members} == {"مبلغ"}
     ]
     assert len(amount_matches) == 1
-    assert any("ستون شناسه مشترک" in text for text in amount_matches[0].evidence)
+    evidence = " ".join(amount_matches[0].evidence)
+    assert "ستون شناسه مشترک" in evidence
+    assert "هم‌پوشانی مقادیر" in evidence
 
 
 # --------------------------------------------------------------------------- #
@@ -434,6 +499,9 @@ def test_period_parser_supports_formats_and_calendars():
         "بهار 1403": ("jalali", "range"),
         "نیمه دوم 1403": ("jalali", "range"),
         "نیمسال دوم 1403": ("jalali", "range"),
+        "مرداد و شهریور 1403": ("jalali", "range"),
+        "مرداد، شهریور 1403": ("jalali", "range"),
+        "January and February 2024": ("gregorian", "range"),
         "q2-2024": ("gregorian", "range"),
         "از 1403/01/01 تا 1403/03/31": ("jalali", "range"),
         "1403/01/01-1403/03/31": ("jalali", "range"),
@@ -454,7 +522,10 @@ def test_period_parser_supports_formats_and_calendars():
     assert parse_period("کد پرسنلی 1234") is None
     assert parse_period("گزارش 1234") is None
     assert parse_period("گزارش 1403").year == 1403
-    assert parse_period("سه ماهه 1403").granularity == "year"
+    assert parse_period("سه ماهه 1403") is None
+    assert parse_period("شش ماهه 1403") is None
+    assert parse_period("مرداد و مهر 1403") is None
+    assert parse_period("quarter 2024") is None
     assert parse_periods([]) == []
     same = parse_periods(["تیر 1403", "1403/04", "تیرماه ۱۴۰۳"])
     assert len({item.key for item in same}) == 1
@@ -471,6 +542,12 @@ def test_period_sets_require_full_coverage_for_equivalence():
     )
     assert compare_period_sets([mordad], [shahrivar]).relation == "incompatible"
     assert compare_period_sets([year, mordad], [mordad]).relation == "overlapping"
+    two_months = parse_period("مرداد و شهریور 1403")
+    assert two_months is not None and two_months.granularity == "range"
+    assert (
+        compare_period_sets([two_months], [mordad, shahrivar]).relation
+        == "equivalent"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -502,6 +579,14 @@ def test_matching_report_is_audit_only(settings, make_workbook, tmp_path):
     )
     workbook = openpyxl.load_workbook(audit_output)
     assert "تطبیق معنایی منابع" in workbook.sheetnames
+    text = " ".join(
+        str(cell.value)
+        for row in workbook["تطبیق معنایی منابع"].iter_rows()
+        for cell in row
+        if cell.value is not None
+    )
+    assert "دوره:" in text
+    assert "واحد:" in text
     workbook.close()
 
     clean_output = tmp_path / "clean.xlsx"
@@ -677,6 +762,8 @@ def test_two_month_blocks_in_one_year_sheet_keep_their_own_periods(
 
 
 def test_unit_adjectives_are_recognized_without_a_separate_unit_column():
+    from decimal import Decimal
+
     from local_office_ai.excel.semantic_matching import canonical_unit
 
     assert canonical_unit("مبلغ ریالی").canonical == "IRR"
@@ -684,3 +771,6 @@ def test_unit_adjectives_are_recognized_without_a_separate_unit_column():
     assert canonical_unit("تعداد نفری").canonical == "PERSON"
     assert canonical_unit("سهم درصدی").canonical == "PERCENT"
     assert canonical_unit("تعداد پرونده").known is False
+    hemmat = canonical_unit("مبلغ (همت)")
+    assert hemmat.canonical == "TOMAN"
+    assert hemmat.scale == Decimal("1000000000000")
