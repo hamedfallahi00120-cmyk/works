@@ -318,3 +318,72 @@ is absent and they are not counted as passing.
 - The owner's Windows environment and the three original administrative files.
 - Real-file acceptance for the new semantic and quality checks; the evidence uses
   synthetic `.xlsx` files created by the test suite.
+
+## Prompt 02B — Statistical reconciliation and calculation integrity (branch evidence)
+
+Branch `feature/prompt-02b-statistical-reconciliation`, based on `main` at `d173465`
+(the merge of Prompt 02A). No aggregation was added to the request-answering path;
+the new engine validates relationships that already exist in the workbook.
+
+### Implementation
+
+- `excel/statistical_reconciliation.py` (new): deterministic `Decimal` arithmetic for
+  component-to-total, subtotal-to-grand-total, group-to-subgroup, monthly-to-period and
+  cross-period checks. `AggregationEvidence` rejects forbidden roles (grand total,
+  subtotal, percentage, difference, note), duplicate categories, overlapping category
+  tags and mixed units before a sum is calculated. A missing component is `WARNING`
+  with `calculated=None`, never zero.
+- `compute_change` records absolute change, percentage change, direction and baseline
+  status. A zero or missing baseline yields `percent=None` with `WARNING`; no division
+  by zero and no fabricated percentage. `compute_ratio` and `compute_average` refuse a
+  missing denominator; a weighted average is required when both a ratio column and a
+  weight column exist, and the simple mean is never reported as the weighted result.
+- `Tolerance.for_workbook` derives an absolute rounding tolerance from the component
+  count and the workbook scale; `PASS`, `WARNING` and `FAIL` are explicit. Every
+  `ReconciliationResult` keeps expected, calculated, difference, tolerance, status,
+  explanation, sheet, block, measure and source addresses; `verified` is true only for
+  a justified relationship with a real expected value.
+- `app/workflow.py`: `AnalysisResult.statistical_reconciliation` is built after
+  semantics, quality and the period matrix. `core/models.py` serializes it into the
+  processed JSON.
+- `generic_report.py` / `report_writer.py`: the audit profile writes «تطبیق آماری و
+  صحت محاسبات»; the clean «اعتبارسنجی داده» sheet gains a compact reconciliation
+  summary and lists non-`PASS` reconciliation and comparison findings only.
+- `ai/context_builder.py`: reconciliation facts are included in the AI context and all
+  reconciliation values are added to `allowed_numbers`. `ai/analyzer.py` treats a
+  reconciliation `FAIL` as a real mismatch. Qwen may explain the recorded figures but
+  cannot introduce a new number without failing the existing number validator.
+- `tests/test_statistical_reconciliation.py` (new, 24 tests) covers the nine required
+  cases with real openpyxl workbooks plus direct engine calls: correct and incorrect
+  component totals, subtotal/grand-total, nested and overlapping categories, zero
+  baseline, missing denominators, weighted versus unweighted averages, rounding
+  tolerances, increase/decrease interpretation, mixed units from a «واحد» column,
+  monthly-to-period reconciliation, cross-period comparison, incomplete months,
+  serialization, clean/audit output profiles and the AI number allow-list.
+  `tests/test_output_quality.py` guards the new audit-only sheet.
+
+### Test evidence [SBX]
+
+Sandbox: Linux, CPython 3.13.15. Not Windows-target validation.
+
+```text
+python -m pytest tests/test_statistical_reconciliation.py -o addopts="" -q
+-> 24 passed in 1.67s (exit 0)
+
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+-> 243 passed, 6 skipped, 36 deselected, 1 xfailed in 26.84s (exit 0)
+```
+
+The single `xfailed` outcome is still T9, the open output-suffix defect. The 36
+deselected tests are the `requires_sample` set; their private reference workbook is
+absent and they are not counted as passing.
+
+### Not validated
+
+- The owner's Windows environment and the three original administrative files.
+- Real-file acceptance for the new reconciliation checks; the evidence uses synthetic
+  `.xlsx` files created by the test suite.
+- Group-to-subgroup and category-level comparisons are exercised directly and through
+  group-heading blocks; a workbook with overlapping administrative classifications
+  still requires the explicit category evidence API because a single table cannot prove
+  that two labels describe the same population.

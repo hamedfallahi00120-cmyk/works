@@ -561,6 +561,10 @@ class AnalysisResult:
     # findings.  Both are produced before statistical conclusions are drawn.
     semantics: Any = None
     quality: Any = None
+    # Deterministic reconciliation of declared totals, subtotals, groups,
+    # monthly cells and cross-period figures.  Every record carries the
+    # expected/calculated values, tolerance, status and source addresses.
+    statistical_reconciliation: Any = None
     # Period matrix built from the periodic sheets (month x period x metric) and
     # the grounded answers to the user's Persian request.
     integration: Any = None
@@ -615,6 +619,11 @@ class AnalysisResult:
                 self.quality.to_dict()
                 if hasattr(self.quality, "to_dict")
                 else self.quality
+            ),
+            "statistical_reconciliation": (
+                self.statistical_reconciliation.to_dict()
+                if hasattr(self.statistical_reconciliation, "to_dict")
+                else self.statistical_reconciliation
             ),
             "validation": [
                 item.to_dict() if hasattr(item, "to_dict") else item for item in self.validation

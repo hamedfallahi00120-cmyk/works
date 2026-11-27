@@ -34,9 +34,10 @@ Prompt 01A is implemented and merged:
 T2 and T3 no longer carry xfail markers; they must keep passing normally. Do not
 reintroduce substring totals matching or let temporal keys back into numeric measures.
 
-Prompt 01B was merged to `main` as PR #5 (`113cc1f`). Prompt 02A is implemented on
-`feature/prompt-02a-semantic-quality`; the branch is local and is not merged or pushed to
-`main`. See the section below.
+Prompt 01B was merged to `main` as PR #5 (`113cc1f`). Prompt 02A was merged to `main`
+as PR #6 (`d173465`). Prompt 02B is implemented on
+`feature/prompt-02b-statistical-reconciliation`; the branch is local and is not merged
+or pushed to `main`. See the sections below.
 
 ### Prompt 01A extraction model
 
@@ -143,9 +144,37 @@ truncated.
   that mention a measure word, metadata evidence and per-block quality with real openpyxl
   workbooks. `tests/test_output_quality.py` guards the two audit-only sheets.
 
+### Prompt 02B statistical reconciliation and calculation integrity
+
+- `excel/statistical_reconciliation.py` — deterministic `Decimal` engine for
+  component-to-total, subtotal-to-grand-total, group-to-subgroup, monthly-to-period and
+  cross-period checks. `AggregationEvidence` requires distinct, non-overlapping
+  components with one unit; grand-total, subtotal, percentage, difference and note rows
+  are never components. A missing component stays `None` and yields `WARNING`, never
+  zero. `compute_change` records absolute change, percentage change, direction and a
+  zero/missing baseline without dividing by zero. `compute_ratio` and
+  `compute_average` refuse a missing denominator; a weighted average is required when a
+  ratio column and a weight column exist. `Tolerance.for_workbook` derives the rounding
+  tolerance, and every result records expected, calculated, difference, tolerance,
+  `PASS`/`WARNING`/`FAIL`, explanation, sheet, block, measure and source addresses.
+- `app/workflow.py` — reconciliation is built after semantics, quality and the period
+  matrix. `AnalysisResult.statistical_reconciliation` is serialized into the processed
+  JSON.
+- The audit profile writes «تطبیق آماری و صحت محاسبات»; the clean «اعتبارسنجی داده»
+  sheet shows a compact summary and non-`PASS` reconciliation/comparison findings only.
+- `ai/context_builder.py` includes reconciliation facts and adds every approved value to
+  `allowed_numbers`; `ai/analyzer.py` treats a reconciliation `FAIL` as a real mismatch.
+  Qwen explains recorded results and may not recalculate them.
+- `tests/test_statistical_reconciliation.py` (24 tests) covers the nine required cases
+  with real openpyxl workbooks: correct/incorrect component totals, subtotal/grand total,
+  nested and overlapping categories, zero baseline, missing denominators, weighted
+  versus unweighted averages, rounding tolerances, increase/decrease interpretation,
+  mixed units from a «واحد» column, monthly-to-period reconciliation, cross-period
+  comparison, incomplete months, serialization, output profiles and the AI allow-list.
+
 ### Instructions for the next AI agent
 
-1. Fetch the repository and start from the branch that contains Prompt 02A
+1. Fetch the repository and start from the branch that contains Prompt 02B
    (see `docs/quality_evidence.md` for the verified state).
 2. Verify the checked-out branch, HEAD SHA and clean working tree. Do not switch to
    `main` for implementation.
@@ -154,10 +183,11 @@ truncated.
 4. Treat the Phase 0 audit and its recorded evidence as the accepted project baseline.
    Do not repeat the full audit or ask the user to resend these repository documents.
 5. Prompt 01A (**Data Model, Workbook Structure, and Metadata Extraction**), Prompt 01B
-   (**Multi-Block Extraction, Table Boundaries, and Total Detection**) and Prompt 02A
-   (**Semantic Classification and Data Quality Validation**) are implemented. Do not
+   (**Multi-Block Extraction, Table Boundaries, and Total Detection**), Prompt 02A
+   (**Semantic Classification and Data Quality Validation**) and Prompt 02B
+   (**Statistical Reconciliation and Calculation Integrity**) are implemented. Do not
    repeat them or substitute audit Phase 1a for them. The next engineering action starts
-   only after the owner accepts Prompt 02A.
+   only after the owner accepts Prompt 02B.
 6. Follow the supplied shared execution contract: one dedicated branch per stage,
    focused tests, actual evidence, no merge/push to `main`, no rewrite of project
    architecture, Python as the numeric source of truth, and Qwen for narrative only.
@@ -179,6 +209,8 @@ from the CI gate with `-m "not requires_sample"`; they are not counted as succes
   quality → optional loan calculations/reconciliation → report writer.
   `semantic_vocabulary.py`, `semantic_classification.py` and `data_quality.py` classify
   field roles and record quality findings before statistics.
+  `statistical_reconciliation.py` validates declared totals, groups and periods without
+  summing unrelated rows.
   `statistical_analysis.py` is the general engine; `generic_report.py` holds the generic
   report sheets as a mixin. `validation.py` holds the 9-check quality checklist.
 - `src/local_office_ai/ai/` — Ollama client, context builder, prompts, response validator,
@@ -265,6 +297,14 @@ is such a file: 4 sheets labelled 1403/1404, 4 labelled 1404/1405, heaviest over
 - Data-quality findings carry `PASS`/`WARNING`/`FAIL` and a sheet/cell location. Never
   delete, repair or coerce a questionable value. The clean profile lists non-`PASS`
   findings only; the audit profile keeps the full «کیفیت داده (تفصیلی)» sheet.
+- Never sum rows just because they are numeric. A reconciliation needs a justified
+  relationship: distinct non-overlapping components, one unit, no total/subtotal/
+  percentage/difference row as a component, and a real expected value. A missing
+  component stays `None` (`WARNING`), never zero. A zero or missing baseline yields
+  `percent=None`, never a fabricated percentage. Use the weighted average when a ratio
+  column and a weight column exist; never present the simple mean as the weighted result.
+  Every result records expected, calculated, difference, tolerance, status, explanation
+  and source addresses. A reconciliation `FAIL` is a real mismatch for the AI validator.
 - General statistics must stay type-aware and non-destructive: missing values and IQR
   outliers are counted/labelled, never silently deleted.
 - Do not make loan/financial columns a prerequisite for selecting the primary table or

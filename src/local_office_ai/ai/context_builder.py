@@ -416,6 +416,7 @@ def build_facts(
         "request_text": getattr(getattr(analysis, "request_intent", None), "text", ""),
         "audits_of_declared_totals": audits,
         "reconciliation": reconciliation,
+        "statistical_reconciliation": _reconciliation_facts(analysis),
         "reconciliation_counts": {
             "matched": sum(1 for item in analysis.reconciliation if item.status.value == "match"),
             "probable": sum(1 for item in analysis.reconciliation if item.status.value == "probable"),
@@ -448,6 +449,61 @@ def build_facts(
         ],
     }
     return _trim(facts, settings.max_ai_context_chars)
+
+
+def _reconciliation_facts(analysis: AnalysisResult) -> dict[str, Any] | None:
+    report = getattr(analysis, "statistical_reconciliation", None)
+    if report is None:
+        return None
+    return {
+        "status": report.status.value,
+        "counts": report.counts(),
+        "reconciliations": [
+            {
+                "kind": item.kind,
+                "label": item.label,
+                "measure": item.measure,
+                "status": item.status.value,
+                "expected": _num(item.expected),
+                "calculated": _num(item.calculated),
+                "difference": _num(item.difference),
+                "explanation": item.explanation,
+                "source": item.expected_source or (item.sources[0] if item.sources else ""),
+            }
+            for item in report.reconciliations[:12]
+        ],
+        "comparisons": [
+            {
+                "metric": item.metric,
+                "previous_period": item.previous_label,
+                "current_period": item.current_label,
+                "status": item.status.value,
+                "previous": _num(item.change.previous),
+                "current": _num(item.change.current),
+                "absolute": _num(item.change.absolute),
+                "percent": _num(item.change.percent),
+                "direction": item.change.direction,
+                "months_used": item.months_used,
+            }
+            for item in report.comparisons[:12]
+        ],
+        "averages": [
+            {
+                "label": item.label,
+                "status": item.status.value,
+                "value": _num(item.value),
+                "unweighted": _num(item.unweighted),
+                "weighted": _num(item.weighted),
+                "weighted_used": item.weighted_used,
+                "explanation": item.explanation,
+            }
+            for item in report.averages[:8]
+        ],
+        "note": (
+            "همه مقادیر تطبیق در Python با Decimal محاسبه شده‌اند؛ مدل فقط می‌تواند "
+            "همین اعداد و وضعیت‌ها را توضیح دهد و مجاز به محاسبه مجدد نیست."
+        ),
+    }
 
 
 def _period_facts(analysis: AnalysisResult) -> dict[str, Any] | None:
@@ -622,6 +678,13 @@ def _trim(facts: dict[str, Any], budget: int) -> tuple[dict[str, Any], dict[str,
             for entry in period.get("metrics") or []:
                 entry.pop("month_totals", None)
             payload = json.dumps(facts, ensure_ascii=False)
+    reconciliation = facts.get("statistical_reconciliation")
+    if reconciliation:
+        for key in ("reconciliations", "comparisons", "averages"):
+            while len(payload) > budget and len(reconciliation.get(key) or []) > 3:
+                reconciliation[key] = reconciliation[key][:-1]
+                meta["trimmed_reconciliation"] += 1
+                payload = json.dumps(facts, ensure_ascii=False)
     if len(payload) > budget:
         facts["sample_rows"] = []
         facts["rules"] = facts["rules"][:2]
@@ -668,6 +731,7 @@ def _trim(facts: dict[str, Any], budget: int) -> tuple[dict[str, Any], dict[str,
                 for item in (facts.get("request_answers") or [])[:10]
             ],
             "request_text": facts.get("request_text"),
+            "statistical_reconciliation": facts.get("statistical_reconciliation"),
             "note": "بسته داده به دلیل محدودیت طول خلاصه شد؛ محاسبات تأییدشده و جمع‌های ماهانه حفظ شد.",
             "data_gaps": facts["data_gaps"][:5],
         }
@@ -823,6 +887,7 @@ def _merge_sheet_facts(
         "important_anomalies": [],
         "reconciliation": [],
         "audits_of_declared_totals": [],
+        "statistical_reconciliation": base.get("statistical_reconciliation"),
         "data_gaps": [],
         "rules": list(base.get("rules") or [])[:5],
         "chunking_note": "این درخواست شامل خلاصه ساختاری و آماری چند برگه است؛ داده خام ارسال نشده است.",
@@ -849,6 +914,32 @@ def allowed_numbers(analysis: AnalysisResult) -> set[str]:
         for value in (item.loan_total, item.obligation_total, item.difference):
             if isinstance(value, Decimal):
                 allowed.add(canonical_number(value))
+    statistical = getattr(analysis, "statistical_reconciliation", None)
+    if statistical is not None:
+        for item in statistical.reconciliations:
+            for value in (item.expected, item.calculated, item.difference):
+                if isinstance(value, Decimal):
+                    allowed.add(canonical_number(value))
+            for component in item.components:
+                value = component.get("value")
+                if value not in (None, ""):
+                    allowed.add(canonical_number(value))
+        for item in statistical.comparisons:
+            for value in (
+                item.change.previous,
+                item.change.current,
+                item.change.absolute,
+                item.change.percent,
+            ):
+                if isinstance(value, Decimal):
+                    allowed.add(canonical_number(value))
+            allowed.add(str(len(item.months_used)))
+        for item in statistical.averages:
+            for value in (item.value, item.unweighted, item.weighted):
+                if isinstance(value, Decimal):
+                    allowed.add(canonical_number(value))
+        for count in statistical.counts().values():
+            allowed.add(str(count))
     for loan in analysis.loans:
         for value in (loan.principal, loan.installment, loan.installment_count, loan.contract_repayment):
             if isinstance(value, Decimal):

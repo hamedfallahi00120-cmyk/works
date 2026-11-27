@@ -27,6 +27,7 @@ INTERNAL_SHEETS = {
     "بلوک‌های استخراج",
     "نقش‌های معنایی",
     "کیفیت داده (تفصیلی)",
+    "تطبیق آماری و صحت محاسبات",
     "ردیابی منبع",
     "روش‌شناسی آماری",
     "نتایج محاسبات",
@@ -129,6 +130,7 @@ def test_audit_profile_keeps_traceability(monthly_workbook, folder_settings, tmp
         "بلوک‌های استخراج",
         "نقش‌های معنایی",
         "کیفیت داده (تفصیلی)",
+        "تطبیق آماری و صحت محاسبات",
     } <= set(workbook.sheetnames)
     workbook.close()
 
