@@ -1,0 +1,76 @@
+# ---- Python caches / bytecode ----
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ---- Virtual environments ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- Secrets and local credentials ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials.json
+token.json
+
+# ---- Local databases and private user data ----
+*.db
+*.sqlite
+*.sqlite3
+*.mdb
+*.accdb
+data/output/*.xlsx
+data/output/*.json
+data/output/images/
+data/processed/*.json
+!data/processed/.gitkeep
+data/temp/*
+!data/temp/.gitkeep
+
+# ---- Logs ----
+logs/
+*.log
+
+# ---- Model weights and generated media ----
+*.gguf
+*.safetensors
+*.ckpt
+*.onnx
+*.pt
+*.pth
+*.bin
+
+# ---- Build and distribution artifacts ----
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# ---- Editor / OS noise ----
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Temporary files ----
+*.tmp
+*.temp
+*.bak
+*.swp
+*~

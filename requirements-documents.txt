@@ -1,0 +1,9 @@
+# Optional readers for multi-format administrative documents.
+# Install these in the existing project venv only when using Word/PPTX/PDF/OCR.
+python-docx>=1.2.0,<2
+python-pptx>=1.0.2,<2
+pdfplumber>=0.11.11,<1
+Pillow>=13.0,<14
+pytesseract>=0.3.13,<0.4
+
+pypdfium2>=5.15.2,<6
