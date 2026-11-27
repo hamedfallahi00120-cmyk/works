@@ -185,6 +185,9 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
         "semantic_matching": lambda self, wb, context: self._semantic_matching_sheet(
             wb, context.analysis
         ),
+        "duplicate_control": lambda self, wb, context: self._duplicate_control_sheet(
+            wb, context.analysis
+        ),
     }
 
     def _plan(self, context: ReportContext, profile: str) -> list[str]:
@@ -243,6 +246,8 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
             audit_tail.append("statistical_reconciliation")
         if getattr(analysis, "semantic_matching", None) is not None:
             audit_tail.append("semantic_matching")
+        if getattr(analysis, "duplicate_control", None) is not None:
+            audit_tail.append("duplicate_control")
         audit_tail.extend(
             [
                 "normalized",
@@ -1070,6 +1075,67 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
                 row += 1
             if not wrote:
                 self._value_cell(ws, row, 1, "تطبیق آماری خارج از PASS ثبت نشد.")
+                row += 1
+
+        duplicate_control = getattr(analysis, "duplicate_control", None)
+        if duplicate_control is not None:
+            from local_office_ai.excel.duplicate_control import AGGREGATION_STATUS_FA
+
+            row += 1
+            self._section(ws, row, "کنترل تکرار و تجمیع ایمن (شاهد و تصمیم)", 5)
+            row += 1
+            counts = duplicate_control.counts()
+            roles = duplicate_control.role_counts()
+            self._value_cell(ws, row, 1, "خلاصه کنترل تکرار")
+            self._value_cell(
+                ws,
+                row,
+                2,
+                f"داده اولیه {roles.get('primary', 0)} / خلاصه {roles.get('summary', 0)} / "
+                f"مشتق {roles.get('derived', 0)} / تکراری {roles.get('duplicate', 0)}",
+            )
+            self._value_cell(
+                ws,
+                row,
+                3,
+                f"گروه تکراری {counts['duplicate_groups']} / رکورد تکراری "
+                f"{counts['record_duplicates']} / مجاز {counts['allowed']} / "
+                f"نیازمند بررسی {counts['review']} / مسدود {counts['blocked']}",
+            )
+            ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=5)
+            row += 1
+            wrote = False
+            pending = [
+                *duplicate_control.blocked_decisions,
+                *duplicate_control.review_decisions,
+            ]
+            for decision in pending[:40]:
+                wrote = True
+                self._value_cell(ws, row, 1, decision.metric)
+                self._value_cell(ws, row, 2, "؛ ".join(decision.members))
+                self._value_cell(
+                    ws,
+                    row,
+                    3,
+                    AGGREGATION_STATUS_FA.get(decision.status, decision.status.value),
+                )
+                self._value_cell(ws, row, 4, len(decision.checks))
+                self._value_cell(ws, row, 5, "؛ ".join(decision.reasons) or "—")
+                self._fill(
+                    ws.cell(row, 3),
+                    RED if decision.status.value == "blocked" else YELLOW,
+                )
+                row += 1
+            if len(pending) > 40:
+                self._value_cell(
+                    ws,
+                    row,
+                    1,
+                    f"… و {len(pending) - 40} تصمیم دیگر در برگه «کنترل تکرار و تجمیع» (نمای audit).",
+                )
+                row += 1
+            if not wrote:
+                self._value_cell(ws, row, 1, "تصمیم مسدود یا نیازمند بررسی ثبت نشد.")
                 row += 1
 
         ws.freeze_panes = "A5"

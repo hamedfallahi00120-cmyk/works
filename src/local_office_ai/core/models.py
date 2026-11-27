@@ -569,6 +569,10 @@ class AnalysisResult:
     # files: normalized labels, units, periods, identifier/value evidence and
     # matched/probable/ambiguous/rejected decisions.  It never aggregates.
     semantic_matching: Any = None
+    # Duplicate/derived-sheet control and safe-aggregation decisions across
+    # worksheets and files.  Every inclusion, exclusion and blocked decision is
+    # recorded; nothing is aggregated, repaired or deleted here.
+    duplicate_control: Any = None
     # Period matrix built from the periodic sheets (month x period x metric) and
     # the grounded answers to the user's Persian request.
     integration: Any = None
@@ -633,6 +637,11 @@ class AnalysisResult:
                 self.semantic_matching.to_dict()
                 if hasattr(self.semantic_matching, "to_dict")
                 else self.semantic_matching
+            ),
+            "duplicate_control": (
+                self.duplicate_control.to_dict()
+                if hasattr(self.duplicate_control, "to_dict")
+                else self.duplicate_control
             ),
             "validation": [
                 item.to_dict() if hasattr(item, "to_dict") else item for item in self.validation

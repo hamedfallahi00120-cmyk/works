@@ -534,3 +534,62 @@ sandbox. None is counted as passing.
 - No unrestricted aggregation is performed in this stage. `comparable=True` only means
   the two values may be compared; later stages must still apply the declared-total and
   reconciliation rules from Prompt 02B.
+
+## Prompt 03B — duplicate detection, derived sheets and safe aggregation [SBX]
+
+### Implemented
+
+- `excel/duplicate_control.py` records exact duplicate tables, copied summaries,
+  formula-derived sheets, parent/child categories, subtotal/grand-total rows and
+  overlapping administrative groups before any cross-source total. It never deletes,
+  repairs or aggregates a value.
+- Worksheet roles are `primary`, `summary`, `derived`, `duplicate` and `unknown` with
+  confidence and evidence. Formula evidence uses whole-sheet formula and cross-sheet
+  reference counts, so a small summary sheet without a detected table is still classified.
+- Every aggregation decision is a field pair with six checks: indicator equivalence,
+  period compatibility, unit compatibility, category relationship, source independence
+  and non-overlapping coverage. `ALLOWED` needs all six `PASS`; a pair inside one block is
+  never independent, and a missing period keeps coverage at `REVIEW`.
+- Duplicate and summary fingerprints are split by reporting period, so equal values in
+  two months are not duplicates. Positional row-number columns are not identifiers, and a
+  summary row without a measure value is not fingerprinted.
+- `AnalysisResult.duplicate_control` is serialized into the processed JSON.
+  `FolderResult.duplicate_control` is built after semantic matching. The folder
+  «مقایسه بین فایل‌ها» sheet suppresses «جمع فایل‌ها»/share with a status when the
+  contributors' cross-source status is not `ALLOWED`; one contributing file is always
+  safe. «پاسخ درخواست» keeps the most/least comparison and omits an unsafe share.
+- The audit profile writes «کنترل تکرار و تجمیع»; the clean profile never writes it and
+  shows a compact role/decision summary plus at most 40 blocked/review decisions in
+  «اعتبارسنجی داده».
+
+### Test evidence [SBX]
+
+Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
+
+```text
+python -m pytest tests/test_duplicate_control.py -o addopts="" -q
+-> 13 passed in 2.44s (exit 0)
+
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+-> 295 passed, 2 skipped, 36 deselected, 1 xfailed in 36.21s (exit 0)
+```
+
+`tests/test_duplicate_control.py` uses real openpyxl workbooks and covers exact duplicate
+tables in different worksheets, copied summaries in different workbooks, formula-based
+summary sheets, parent/child categories, subtotal and grand-total duplication, overlapping
+administrative classifications, independent sources with the same metric, similar-looking
+but independent datasets, a derived sheet without summary labels, copied total rows with
+different detail, record-level duplicates that are kept, identical values in different
+periods, serialization and the audit/clean output profiles.
+
+### Not validated
+
+- The owner's Windows environment and the three original administrative files; all
+  evidence uses synthetic `.xlsx` files.
+- Formula references are matched by sheet name; external-workbook links are not followed.
+  A workbook that was never opened by Excel has no cached formula values, so an empty
+  total row has no summary fingerprint and is not grouped.
+- A duplicate whose values were edited slightly is `REVIEW`, not proof. A table with no
+  real key column gets `REVIEW` coverage instead of a guessed overlap.
+- The folder comparison refuses only the cross-file sum/share; it does not rewrite or
+  remove any per-file figure.

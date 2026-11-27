@@ -1471,3 +1471,256 @@ class GenericReportMixin:
         })
         ws.freeze_panes = "A5"
         self._print_setup(ws)
+
+    # ------------------------------------------------------------------ #
+    def _duplicate_control_sheet(self, wb, analysis: AnalysisResult) -> None:
+        """Audit-only trace of duplicates, derived sheets and aggregation gates."""
+        from local_office_ai.excel.duplicate_control import (
+            AGGREGATION_STATUS_FA,
+            CHECK_STATUS_FA,
+            RELATION_KIND_FA,
+            SHEET_ROLE_FA,
+        )
+
+        report = getattr(analysis, "duplicate_control", None)
+        ws = wb.create_sheet("کنترل تکرار و تجمیع")
+        self._rtl(ws)
+        self._title(ws, "کنترل تکرار، برگه مشتق و تجمیع ایمن: شاهد و تصمیم", 10)
+        row = 3
+        if report is None:
+            self._value_cell(ws, row, 1, "کنترل تکرار برای این فایل ساخته نشد.")
+            self._print_setup(ws)
+            return
+
+        counts = report.counts()
+        self._value_cell(ws, row, 1, "خلاصه")
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+        self._value_cell(
+            ws,
+            row,
+            2,
+            f"منبع {counts['sources']} — برگه {counts['sheets']} — بلوک {counts['blocks']} — "
+            f"گروه محتوای تکراری {counts['duplicate_groups']} — رکورد تکراری "
+            f"{counts['record_duplicates']} — تصمیم تجمیع: مجاز {counts['allowed']} / "
+            f"نیازمند بررسی {counts['review']} / مسدود {counts['blocked']} — "
+            f"کنارگذاشته {counts['exclusions']}",
+        )
+        row += 1
+        self._value_cell(ws, row, 1, "اصل کار")
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+        self._value_cell(
+            ws,
+            row,
+            2,
+            "هیچ رکورد، برگه یا مقدار حذف یا اصلاح نشد. تجمیع فقط وقتی «مجاز» است که "
+            "هم‌ارزی شاخص، سازگاری دوره و واحد، رابطه دسته، استقلال منبع و جدا بودن "
+            "پوشش داده اثبات شود؛ موارد مبهم برای بررسی علامت خورده‌اند.",
+        )
+        row += 2
+
+        if report.warnings:
+            self._section(ws, row, "هشدارهای کنترل تکرار", 9)
+            row += 1
+            for warning in report.warnings:
+                self._value_cell(ws, row, 1, "هشدار")
+                ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+                self._value_cell(ws, row, 2, warning)
+                self._fill(ws.cell(row, 1), YELLOW)
+                row += 1
+            row += 1
+
+        if report.sheets:
+            self._section(ws, row, "طبقه‌بندی برگه‌ها: داده اولیه، خلاصه، مشتق، تکراری", 10)
+            row += 1
+            self._header(ws, row, [
+                "منبع", "برگه", "نقش", "اطمینان", "بلوک داده", "سلول فرمول",
+                "ارجاع فرمولی به", "تکراری از", "ردیف جمع", "شاهد",
+            ])
+            header_row = row
+            row += 1
+            role_colors = {
+                "primary": GREEN,
+                "summary": YELLOW,
+                "derived": YELLOW,
+                "duplicate": RED,
+                "unknown": GREY,
+            }
+            for sheet in report.sheets:
+                values = [
+                    sheet.source,
+                    sheet.sheet,
+                    SHEET_ROLE_FA.get(sheet.role, sheet.role.value),
+                    f"{sheet.confidence:.0%}",
+                    sheet.data_blocks,
+                    sheet.formula_cells,
+                    "، ".join(sheet.referenced_sheets) or "—",
+                    "، ".join(sheet.duplicate_of) or "—",
+                    sheet.summary_rows,
+                    "؛ ".join(sheet.evidence) or "—",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                self._fill(ws.cell(row, 3), role_colors.get(sheet.role.value, GREY))
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 10)
+            row += 1
+
+        if report.duplicate_groups:
+            self._section(ws, row, "گروه‌های محتوای تکراری: هیچ‌کدام مستقل شمرده نمی‌شوند", 10)
+            row += 1
+            self._header(ws, row, [
+                "گروه", "نوع", "یکسان", "شباهت", "اعضا", "دلیل", "شاهد", "", "", "",
+            ])
+            header_row = row
+            row += 1
+            for group in report.duplicate_groups:
+                values = [
+                    group.group_id,
+                    "جمع تکراری" if group.kind == "summary" else "جدول تکراری",
+                    "بله" if group.identical else "خیر",
+                    f"{group.similarity:.0%}",
+                    "؛ ".join(member.label for member in group.members),
+                    group.reason,
+                    "؛ ".join(group.evidence),
+                    "",
+                    "",
+                    "",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                self._fill(ws.cell(row, 3), RED if group.identical else YELLOW)
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 7)
+            row += 1
+
+        if report.record_duplicates:
+            self._section(ws, row, "کلیدهای تکراری در سطح رکورد", 10)
+            row += 1
+            self._header(ws, row, [
+                "منبع", "برگه", "بلوک", "کلید", "ردیف‌ها", "مقدارها", "وضعیت", "شاهد", "", "",
+            ])
+            header_row = row
+            row += 1
+            for item in report.record_duplicates[:200]:
+                values = [
+                    item.source,
+                    item.sheet,
+                    item.block,
+                    "، ".join(item.key_headers) + ": " + " | ".join(item.key_values),
+                    "، ".join(str(number) for number in item.row_numbers),
+                    "؛ ".join(item.measure_values) or "—",
+                    "یکسان" if item.kind == "identical" else "کلید یکسان با مقدار متفاوت",
+                    "؛ ".join(item.evidence),
+                    "",
+                    "",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                self._fill(ws.cell(row, 7), YELLOW if item.kind == "identical" else RED)
+                row += 1
+            if len(report.record_duplicates) > 200:
+                self._value_cell(ws, row, 1, f"… و {len(report.record_duplicates) - 200} مورد دیگر")
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 8)
+            row += 1
+
+        if report.category_relations:
+            self._section(ws, row, "روابط والد/فرزند و هم‌پوشانی گروه‌ها", 10)
+            row += 1
+            self._header(ws, row, [
+                "شناسه", "نوع", "والد/گروه اول", "فرزندان/گروه دوم", "ستون",
+                "مقدار والد", "جمع فرزندان", "اختلاف", "قطعی", "شاهد",
+            ])
+            header_row = row
+            row += 1
+            for relation in report.category_relations:
+                values = [
+                    relation.relation_id,
+                    RELATION_KIND_FA.get(relation.kind, relation.kind.value),
+                    relation.parent_label,
+                    "، ".join(relation.child_labels),
+                    relation.column,
+                    relation.parent_value or "—",
+                    relation.child_sum or "—",
+                    relation.difference or "—",
+                    "بله" if relation.confirmed else "احتمالی",
+                    "؛ ".join(relation.evidence),
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                self._fill(
+                    ws.cell(row, 2),
+                    RED if relation.kind.value == "overlap" else (GREEN if relation.confirmed else YELLOW),
+                )
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 10)
+            row += 1
+
+        if report.decisions:
+            self._section(ws, row, "تصمیم‌های تجمیع ایمن: شش بررسی و نتیجه", 12)
+            row += 1
+            self._header(ws, row, [
+                "شناسه", "شاخص", "اعضا", "نتیجه", "هم‌ارزی شاخص", "سازگاری دوره",
+                "سازگاری واحد", "رابطه دسته", "استقلال منبع", "عدم هم‌پوشانی", "دلیل", "شاهد",
+            ])
+            header_row = row
+            row += 1
+            decision_colors = {"allowed": GREEN, "review": YELLOW, "blocked": RED}
+            for decision in report.decisions[:200]:
+                checks = {check.name: check for check in decision.checks}
+                values = [
+                    decision.decision_id,
+                    decision.metric,
+                    "؛ ".join(decision.members),
+                    AGGREGATION_STATUS_FA.get(decision.status, decision.status.value),
+                    CHECK_STATUS_FA.get(checks["indicator_equivalence"].status, "—"),
+                    CHECK_STATUS_FA.get(checks["period_compatibility"].status, "—"),
+                    CHECK_STATUS_FA.get(checks["unit_compatibility"].status, "—"),
+                    CHECK_STATUS_FA.get(checks["category_relationship"].status, "—"),
+                    CHECK_STATUS_FA.get(checks["source_independence"].status, "—"),
+                    CHECK_STATUS_FA.get(checks["coverage_non_overlap"].status, "—"),
+                    "؛ ".join(decision.reasons) or "—",
+                    "؛ ".join(decision.evidence) or "—",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                self._fill(ws.cell(row, 4), decision_colors.get(decision.status.value, GREY))
+                row += 1
+            if len(report.decisions) > 200:
+                self._value_cell(ws, row, 1, f"… و {len(report.decisions) - 200} تصمیم دیگر")
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 12)
+            row += 1
+
+        if report.exclusions:
+            self._section(ws, row, "فهرست کنارگذاشته‌ها: چرا یک بازنمایی دوباره شمرده نمی‌شود", 9)
+            row += 1
+            self._header(ws, row, ["نوع", "منبع", "برگه", "بلوک", "محل", "دلیل", "شاهد", "", ""])
+            header_row = row
+            row += 1
+            for item in report.exclusions[:300]:
+                values = [
+                    item.kind,
+                    item.source,
+                    item.sheet,
+                    item.block,
+                    item.address or "—",
+                    item.reason,
+                    "؛ ".join(item.evidence) or "—",
+                    "",
+                    "",
+                ]
+                for offset, value in enumerate(values, start=1):
+                    self._value_cell(ws, row, offset, value)
+                row += 1
+            if len(report.exclusions) > 300:
+                self._value_cell(ws, row, 1, f"… و {len(report.exclusions) - 300} مورد دیگر")
+                row += 1
+            self._body(ws, header_row + 1, row - 1, 1, 7)
+
+        self._widths(ws, {
+            "A": 20, "B": 24, "C": 34, "D": 14, "E": 18, "F": 16,
+            "G": 18, "H": 16, "I": 14, "J": 70, "K": 60, "L": 60,
+        })
+        ws.freeze_panes = "A5"
+        self._print_setup(ws)
