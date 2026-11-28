@@ -10,7 +10,7 @@
 - Prompt 03A is implemented on `feature/prompt-03a-semantic-source-matching`; PR #8
   is open and not merged to `main`.
 - Prompt 04B is implemented on `feature/prompt-04b-docx-report-writer`, created from
-  `main` at `4741a98`; it is not merged to `main` yet.
+  `main` at `4741a98`; PR #11 is open and it is not merged to `main` yet.
 - The three original administrative source files and the private sample workbook are
   intentionally not stored in GitHub.
 

@@ -42,8 +42,8 @@ as PR #6 (`d173465`). Prompt 02B was merged to `main` as PR #7 (`891b662`). Prom
 is implemented on `feature/prompt-03a-semantic-source-matching`; the branch is pushed to
 origin and PR #8 is open, but it is not merged to `main`. Prompt 03B was merged to
 `main` as PR #9 (`18fb3d4`), and Prompt 04A was merged as PR #10 (`4741a98`).
-**Prompt 04B is implemented on `feature/prompt-04b-docx-report-writer`; it is not
-merged to `main` yet.** See the sections below.
+**Prompt 04B is implemented on `feature/prompt-04b-docx-report-writer`; PR #11 is open
+and it is not merged to `main` yet.** See the sections below.
 
 ### Prompt 01A extraction model
 

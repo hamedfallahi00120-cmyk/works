@@ -702,6 +702,8 @@ with a template.
 
 ## Prompt 04B — DOCX report writer and Persian RTL rendering
 
+PR #11 is open against `main` at base `4741a98`; not merged yet.
+
 ### Implementation [SBX]
 
 - `src/local_office_ai/reporting/docx_rtl.py` (new): section `w:bidi`/`w:rtlGutter`,
