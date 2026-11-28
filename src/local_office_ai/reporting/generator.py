@@ -8,7 +8,7 @@ from typing import Any
 
 from local_office_ai.core.exceptions import ReportFormatError
 from local_office_ai.core.settings import Settings
-from local_office_ai.reporting.docx_writer import DocxTemplateRenderer
+from local_office_ai.reporting.docx_report_writer import DocxReportWriter
 from local_office_ai.reporting.formats import OutputFormat
 from local_office_ai.reporting.specification import (
     ReportContent,
@@ -130,19 +130,29 @@ class ReportGenerator:
                 request=specification.request,
             )
         content.ensure_valid()
-        template = inspect_docx_template(specification.template_path)  # type: ignore[arg-type]
-        render = DocxTemplateRenderer().render(template, content, specification.output_path)
-        resolved = tuple(
-            sorted(set(template.placeholder_keys) - set(render.unresolved_placeholders))
+        result = DocxReportWriter().build(
+            content,
+            specification.output_path,
+            template_path=specification.template_path,
+            strip_static_figures=not specification.preserve_template_figures,
+        )
+        template = (
+            inspect_docx_template(specification.template_path)
+            if specification.template_path is not None
+            else None
         )
         return ReportGenerationResult(
-            output_path=render.output_path,
+            output_path=result.output_path,
             output_format=OutputFormat.DOCX,
             writer=OutputFormat.DOCX.writer_name,
             template=template,
-            placeholders_resolved=resolved,
-            unresolved_placeholders=render.unresolved_placeholders,
-            warnings=list(render.warnings),
+            placeholders_resolved=result.placeholders_resolved,
+            unresolved_placeholders=result.unresolved_placeholders,
+            warnings=list(result.warnings),
             content_validated=True,
             evidence=specification.evidence,
+            mode=result.mode,
+            sections_written=result.sections_written,
+            tables_written=result.tables_written,
+            validation=result.validation,
         )

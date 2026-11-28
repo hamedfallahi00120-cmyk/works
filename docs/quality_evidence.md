@@ -313,7 +313,7 @@ requirements files before this run.
 
 ```text
 python -m pytest tests/test_semantic_quality.py -o addopts="" -q
--> 23 passed in 1.35s (exit 0)
+-> 23 passed in 1.34s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
 -> 223 passed, 2 skipped, 36 deselected, 1 xfailed in 25.58s (exit 0)
@@ -697,3 +697,83 @@ with a template.
 - Folder and multi-source reports remain XLSX-only. PDF is recognised but not generated.
 - Placeholders inside hyperlinks, text boxes, footnotes or comments are not rewritten;
   body paragraphs, table cells and headers/footers are covered.
+
+---
+
+## Prompt 04B — DOCX report writer and Persian RTL rendering
+
+PR #11 is open against `main` at base `4741a98`; not merged yet.
+
+### Implementation [SBX]
+
+- `src/local_office_ai/reporting/docx_rtl.py` (new): section `w:bidi`/`w:rtlGutter`,
+  paragraph `w:bidi`, run `w:rtl`/`w:bCs`, `w:rFonts/@w:cs` and `w:szCs`, RTL tables
+  (`w:bidiVisual`), repeated header rows (`w:tblHeader`), header shading, real `PAGE`/
+  `NUMPAGES` fields, and header/footer iteration. Right alignment is never treated as RTL.
+- `src/local_office_ai/reporting/docx_report_writer.py` (new): `DocxReportWriter`.
+  Standalone mode builds an A4 report with title page, Persian heading hierarchy,
+  executive summary, RTL tables with captions, source and statistical notes, warnings,
+  conclusions/recommendations, header/footer and page numbers. Template mode preserves
+  sections, margins, styles, headings, tables, numbering and RTL settings; replaces
+  placeholders; removes static historical figures unless `strip_static_figures=False`;
+  inserts the body at `{{content}}`/`{{body}}`/`[[CONTENT]]` or appends it; and skips
+  sections the template already contains to avoid duplication.
+- `src/local_office_ai/reporting/docx_validation.py` (new): `validate_docx_output` and
+  `ensure_valid_docx` reopen the delivered file, verify the ZIP members and XML, then
+  check expected sections/tables, RTL sections/runs/tables, header/footer, page-number
+  field, unresolved placeholders and every numeric claim against
+  `ReportContent.approved_numbers()`. Word field numbers are excluded; preserved template
+  figures can be allowed explicitly. An invalid file raises `ReportFormatError` and is
+  never delivered.
+- `src/local_office_ai/reporting/specification.py`: `ReportContent.from_analysis` now
+  emits identity, metric, descriptive-statistics, request-answer, quality and
+  reconciliation tables, plus `placeholder_values()` and `approved_numbers()`. AI
+  narrative is admitted only when every number it quotes is approved; dropped text is
+  warned about.
+- `src/local_office_ai/reporting/formats.py` / `generator.py`: DOCX routes to
+  `DocxReportWriter`; `requires_template` is `False`. `ReportSpecification` gains
+  `preserve_template_figures`; the generator maps it to `strip_static_figures`.
+- `src/local_office_ai/app/workflow.py`, `app/coordinator.py`, `ui/cli.py`: a Word request
+  without a template builds a standalone report; `--keep-template-figures` is the only
+  way to retain template figures. Folder/multi-source reports remain XLSX-only.
+- T9 (`test_output_suffix_is_validated`) now asserts a real DOCX package and that an
+  explicit `--format xlsx` with a `.docx` name is rejected.
+
+### Test evidence [SBX]
+
+Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
+
+```text
+python -m pytest tests/test_docx_report_writer.py -o addopts="" -q
+-> 25 passed in 9.07s (exit 0)
+
+python -m pytest tests/test_report_output_formats.py -o addopts="" -q
+-> 23 passed in 1.34s (exit 0)
+
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+-> 345 passed, 6 skipped, 36 deselected in 48.55s (exit 0)
+```
+
+`tests/test_docx_report_writer.py` uses real openpyxl workbooks and real python-docx
+templates. It covers: valid DOCX generation; Persian paragraph RTL (`w:bidi`, `w:rtl`,
+`w:cs`, `w:szCs`, `w:lang/@w:bidi`); RTL tables with repeated shaded headers; template
+margins, styles, headings, tables, header/footer preservation; placeholder replacement;
+historical-figure removal and explicit preservation, including formatted runs; template
+body insertion with and without an anchor; generated content under an existing heading
+without duplicating it; filling a matching template table instead of duplicating it;
+every XML part parsed and required table headers checked; numeric consistency (including a tampered DOCX
+and an ungrounded Qwen narrative); manual table/header validation; missing templates;
+invalid output paths (wrong suffix, PDF, output equals template, directory, nested path
+creation); reopening and structural validation; generation-result serialization; and
+CLI end-to-end Word runs with and without a template.
+
+### Not validated
+
+- The owner's Windows environment, Microsoft Word rendering and the real administrative
+  files. DOCX evidence uses synthetic templates and openpyxl workbooks.
+- The writer targets Word built-in styles and a small explicit typography set; it does
+  not embed fonts. The Windows target must provide B Nazanin or Word substitutes it.
+- Template placeholders inside hyperlinks, text boxes, footnotes and comments are outside
+  the replacement pass (Prompt 04A limit). A matching template table is reused only when
+  its normalized header row is identical; otherwise a new table is added.
+- Folder and multi-source reports remain XLSX-only. PDF is recognised but not generated.

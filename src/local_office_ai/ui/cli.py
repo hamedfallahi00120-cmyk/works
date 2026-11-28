@@ -81,7 +81,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--template",
-        help="مسیر قالب DOCX برای تولید گزارش Word (حالت جایگزینی جایگاه‌ها)",
+        help=(
+            "مسیر قالب DOCX اختیاری برای گزارش Word؛ با قالب، چیدمان و جایگاه‌ها حفظ "
+            "و بدنه تحلیلی افزوده می‌شود. بدون قالب، گزارش کامل ساخته می‌شود."
+        ),
+    )
+    parser.add_argument(
+        "--keep-template-figures",
+        action="store_true",
+        help="اعداد ثابت قالب Word را به‌عنوان داده تاریخی نگه دار (پیش‌فرض: حذف)",
     )
     parser.add_argument(
         "--inspect-template",
@@ -166,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
             output=args.output,
             output_format=args.output_format,
             template=args.template,
+            keep_template_figures=args.keep_template_figures,
             profile=profile,
             confirm_structure=confirm,
         )

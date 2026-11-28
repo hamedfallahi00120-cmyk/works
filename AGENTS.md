@@ -30,8 +30,9 @@ Prompt 01A is implemented and merged:
   `تکلیف`, `جمعیت` and `کلاسه پرونده` are ordinary labels while `جمع کل` still totals.
 - T3 (G5/R4) is fixed: `سال`, `ماه` and `روز` columns whose content agrees
   (integer years, months 1..12, days 1..31) become `DataRole.TEMPORAL_KEY`, never measures.
-- T9 (G11/R8) is fixed by Prompt 04A: a `.docx` output requires a valid DOCX
-  template; otherwise the run fails and writes no Excel workbook under a Word name.
+- T9 (G11/R8) is fixed: a `.docx` output is a real Word package. Prompt 04B builds a
+  standalone Word report when no template is supplied, and never writes Excel content
+  under a Word name.
 
 T2 and T3 no longer carry xfail markers; they must keep passing normally. Do not
 reintroduce substring totals matching or let temporal keys back into numeric measures.
@@ -40,9 +41,9 @@ Prompt 01B was merged to `main` as PR #5 (`113cc1f`). Prompt 02A was merged to `
 as PR #6 (`d173465`). Prompt 02B was merged to `main` as PR #7 (`891b662`). Prompt 03A
 is implemented on `feature/prompt-03a-semantic-source-matching`; the branch is pushed to
 origin and PR #8 is open, but it is not merged to `main`. Prompt 03B was merged to
-`main` as PR #9 (`18fb3d4`). **Prompt 04A is implemented on
-`feature/prompt-04a-output-format-docx-template`; it is not merged to `main` yet.**
-See the sections below.
+`main` as PR #9 (`18fb3d4`), and Prompt 04A was merged as PR #10 (`4741a98`).
+**Prompt 04B is implemented on `feature/prompt-04b-docx-report-writer`; PR #11 is open
+and it is not merged to `main` yet.** See the sections below.
 
 ### Prompt 01A extraction model
 
@@ -342,9 +343,10 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
   signals raise `ReportFormatError`; a bare «فایل اکسل» describes the input, so only
   «گزارش/خروجی اکسل» counts as an output request. PDF is recognised but generation is
   explicitly unsupported.
-- `reporting/specification.py` — `ReportSpecification` (format, path, profile, template),
-  `ReportContent`/`ReportValue`/`ReportSection`, and `ReportGenerationResult`. DOCX
-  requires a readable `.docx` template and the output path may not equal the template.
+- `reporting/specification.py` — `ReportSpecification` (format, path, profile, optional
+  template, `preserve_template_figures`), `ReportContent`/`ReportValue`/`ReportSection`,
+  and `ReportGenerationResult`. An explicit DOCX template must be readable, and the
+  output path may not equal the template.
   `ReportContent.from_analysis` builds values only from the validated `AnalysisResult`
   (calculations, descriptive statistics, request answers, warnings, anomalies) and keeps
   each value's source and address. It never reads a template.
@@ -361,12 +363,12 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
   is kept. Unknown placeholders stay untouched and are reported. Output is saved through
   an atomic temp file and checked as a valid DOCX package.
 - `reporting/generator.py` — `ReportGenerator.plan` selects exactly one writer
-  (`ExcelReportWriter` or `DocxTemplateRenderer`) and `generate` routes to it.
+  (`ExcelReportWriter` or `DocxReportWriter`) and `generate` routes to it.
   `RunResult.report` carries the `ReportGenerationResult`. `ReportTemplate.inspect(...)`
   is a convenience alias for `inspect_docx_template`.
-- `app/workflow.py` / `coordinator.py` / `ui/cli.py` — `--format`, `--template` and
-  `--inspect-template`; the workflow resolves the intent before analysis, so a Word
-  request without a template fails before any output is written. `settings.report_format`
+- `app/workflow.py` / `coordinator.py` / `ui/cli.py` — `--format`, optional `--template`,
+  `--keep-template-figures` and `--inspect-template`; the workflow resolves the intent
+  before analysis. `settings.report_format`
   and `settings.docx_template` provide defaults; the configured template applies only to
   Word output, so it cannot break an Excel run, while an explicit `--template` with a
   non-Word format is rejected. `app/folder_workflow.py` and
@@ -386,12 +388,72 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
   would collide with the old temp name, and CLI DOCX generation. Input-file extensions
   (`report.docx`, «فایل docx») are not mistaken for output requests. T9 now passes
   normally; its strict xfail marker was removed.
-- Known limits: this stage defines the contract and a placeholder renderer, not the full
-  professional DOCX layout writer. A template is required for Word output. A placeholder
+- Known limits of this stage: it defines the contract and a placeholder renderer; Prompt
+  04B adds the native layout writer. A template is optional for Word output. A placeholder
   that crosses a run containing a tab, line break or field is left untouched and warned.
   Placeholders inside hyperlinks, text boxes, footnotes or comments are not rewritten;
   body paragraphs, table cells and headers/footers are covered. Folder and multi-source
   reports remain XLSX-only. PDF is recognised but not generated.
+
+### Prompt 04B DOCX report writer and Persian RTL rendering
+
+- `reporting/docx_rtl.py` — real OOXML RTL primitives: section `w:bidi`/`w:rtlGutter`,
+  paragraph `w:bidi`, run `w:rtl`/`w:bCs`, complex-script fonts (`w:rFonts/@w:cs`) and
+  `w:szCs`, RTL tables (`w:bidiVisual`), repeated header rows (`w:tblHeader`), header
+  shading, built-in `PAGE`/`NUMPAGES` fields and header/footer iteration. Alignment alone
+  is never treated as RTL.
+- `reporting/docx_report_writer.py` — `DocxReportWriter` with two modes. Standalone builds
+  a complete A4 report: title page, styled Persian headings, executive summary, RTL
+  tables with captions, source/statistical notes, page breaks, header/footer with real
+  page numbers, warnings, conclusions and recommendations. Template mode preserves the
+  template's sections, margins, styles, headings, tables, numbering and RTL settings,
+  replaces placeholders, strips static historical figures unless
+  `strip_static_figures=False`, inserts the body at `{{content}}`/`{{body}}`/`[[CONTENT]]`
+  or appends it, adds generated content under a heading the template already contains
+  instead of skipping the section, and fills a table whose header row matches a template
+  table instead of duplicating it. Every generated file is reopened and validated before
+  it is returned; an invalid file is never delivered.
+- `reporting/docx_validation.py` — `validate_docx_output`/`ensure_valid_docx`: confirms
+  the DOCX ZIP members, parses every XML part, reopens with python-docx, checks required
+  headings, the required table header rows and count, RTL sections/runs/tables, header/footer, a
+  real PAGE field, unresolved placeholders and that every numeric claim outside Word
+  fields is in `ReportContent.approved_numbers()`. Word field numbers are excluded, benign
+  template numbering is optional, and a preserved template figure can be allowed
+  explicitly.
+- `reporting/specification.py` — `ReportContent.from_analysis` now also emits metric,
+  descriptive-statistics, request-answer, quality and reconciliation tables plus identity,
+  issue and answer values, all with source addresses. `placeholder_values()` and
+  `approved_numbers()` are the only bridge a template or narrative may use. AI narrative
+  is admitted only when every number it quotes is approved; a dropped narrative or finding
+  is reported as a warning.
+- `reporting/formats.py` / `generator.py` — `OutputFormat.DOCX.writer_name` is
+  `DocxReportWriter`; `requires_template` is `False`. `ReportSpecification` accepts an
+  optional template and `preserve_template_figures`; `ReportGenerator` passes
+  `strip_static_figures=not preserve_template_figures`.
+- `app/workflow.py` / `coordinator.py` / `ui/cli.py` — `--keep-template-figures` keeps
+  template figures only when explicitly requested; a Word request without a template now
+  builds a standalone report instead of failing.
+- `tests/test_docx_report_writer.py` (25 tests) uses real openpyxl workbooks and real
+  python-docx templates: valid DOCX packages, Persian paragraph RTL (bidi/rtl/cs/szCs and
+  `w:lang/@w:bidi`), RTL tables with repeated shaded headers, template margins/styles/
+  headings/tables/header/footer preservation, placeholder replacement, historical-figure
+  removal and explicit preservation (including formatted runs), no-anchor append,
+  generated content under an existing heading, reuse of a matching template table,
+  numeric grounding (including tampered output and ungrounded Qwen text), manual table/
+  header validation, missing
+  templates, invalid output paths (wrong suffix, PDF, output=template, directory, nested
+  creation), reopen/validate, generation-result serialization and CLI end-to-end Word runs
+  with and without a template; an anchor with surrounding template text keeps that text.
+- Known limits: the writer targets Word's built-in styles and a small explicit typography
+  set; it does not embed custom fonts (the Windows target must have B Nazanin or Word
+  substitutes it). Template placeholders inside hyperlinks, text boxes, footnotes and
+  comments remain outside the replacement pass (Prompt 04A limit). An existing template
+  heading is not written twice: generated content is added under it, while a matching
+  template table is filled by replacing its data rows. The match is exact on normalized
+  header cells, so a template table with different headers receives a new table instead;
+  a table whose header row had merged cells may not be reused. Folder and multi-source
+  reports remain XLSX-only. PDF is recognised but not generated. The Windows rendering
+  itself cannot be verified on Linux; tests assert the OOXML properties Word reads.
 
 ### Instructions for the next AI agent
 
@@ -408,10 +470,11 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
    (**Semantic Classification and Data Quality Validation**), Prompt 02B
    (**Statistical Reconciliation and Calculation Integrity**), Prompt 03A
    (**Semantic Source Matching and Period Alignment**), Prompt 03B
-   (**Duplicate Detection, Derived Sheets, and Safe Aggregation**) and Prompt 04A
-   (**Output Format Routing and Word Template Architecture**) are implemented. Do
-   not repeat them or substitute audit Phase 1a for them. The next engineering action
-   starts only after the owner accepts the latest prompt.
+   (**Duplicate Detection, Derived Sheets, and Safe Aggregation**), Prompt 04A
+   (**Output Format Routing and Word Template Architecture**) and Prompt 04B
+   (**DOCX Report Writer and Persian RTL Rendering**) are implemented. Do not repeat
+   them or substitute audit Phase 1a for them. The next engineering action starts only
+   after the owner accepts the latest prompt.
 6. Follow the supplied shared execution contract: one dedicated branch per stage,
    focused tests, actual evidence, no merge/push to `main`, no rewrite of project
    architecture, Python as the numeric source of truth, and Qwen for narrative only.

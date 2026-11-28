@@ -81,6 +81,7 @@ class WorkflowOptions:
     output_path: Path | None = None
     output_format: str | None = None
     template: Path | None = None
+    keep_template_figures: bool = False
     confirm_structure: Callable[[AnalysisResult], bool] | None = None
     report_profile: str = "clean"
 
@@ -188,6 +189,7 @@ class ExcelIntelligenceWorkflow:
                 output_path=output_path,
                 profile=profile,
                 template_path=template_path,
+                preserve_template_figures=options.keep_template_figures,
                 request=request_text,
                 evidence=intent.evidence,
             )

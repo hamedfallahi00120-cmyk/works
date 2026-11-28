@@ -1,5 +1,11 @@
-"""Output-format decision layer and DOCX template contract."""
+"""Output-format decision layer and DOCX report writers."""
 
+from local_office_ai.reporting.docx_report_writer import DocxReportResult, DocxReportWriter
+from local_office_ai.reporting.docx_validation import (
+    DocxValidation,
+    ensure_valid_docx,
+    validate_docx_output,
+)
 from local_office_ai.reporting.docx_writer import DocxTemplateRenderer, TemplateRenderResult
 from local_office_ai.reporting.formats import (
     OutputFormat,
@@ -19,6 +25,7 @@ from local_office_ai.reporting.specification import (
     ReportRow,
     ReportSection,
     ReportSpecification,
+    ReportTable,
     ReportValue,
 )
 from local_office_ai.reporting.template import (
@@ -36,7 +43,10 @@ from local_office_ai.reporting.template import (
 )
 
 __all__ = [
+    "DocxReportResult",
+    "DocxReportWriter",
     "DocxTemplateRenderer",
+    "DocxValidation",
     "FontUsage",
     "HeaderFooterInfo",
     "NumberingInfo",
@@ -53,6 +63,7 @@ __all__ = [
     "ReportRow",
     "ReportSection",
     "ReportSpecification",
+    "ReportTable",
     "ReportTemplate",
     "ReportValue",
     "StaticNumericLiteral",
@@ -60,7 +71,9 @@ __all__ = [
     "TemplateRenderResult",
     "detect_requested_formats",
     "ensure_extension_matches",
+    "ensure_valid_docx",
     "ensure_xlsx_delivery",
     "inspect_docx_template",
     "resolve_output_intent",
+    "validate_docx_output",
 ]

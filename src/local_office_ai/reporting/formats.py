@@ -40,7 +40,7 @@ class OutputFormat(str, Enum):
     def writer_name(self) -> str:
         return {
             OutputFormat.XLSX: "ExcelReportWriter",
-            OutputFormat.DOCX: "DocxTemplateRenderer",
+            OutputFormat.DOCX: "DocxReportWriter",
             OutputFormat.PDF: "PDF writer",
         }[self]
 
@@ -50,7 +50,9 @@ class OutputFormat(str, Enum):
 
     @property
     def requires_template(self) -> bool:
-        return self is OutputFormat.DOCX
+        # A Word report is generated from validated content by DocxReportWriter.
+        # A template is optional and, when supplied, switches to template mode.
+        return False
 
     @classmethod
     def from_suffix(cls, suffix: str | None) -> "OutputFormat | None":

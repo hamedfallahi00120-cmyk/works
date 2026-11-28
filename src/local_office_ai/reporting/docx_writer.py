@@ -61,6 +61,33 @@ class DocxTemplateRenderer:
         except Exception as exc:  # noqa: BLE001 - parser errors vary by python-docx version
             raise ReportTemplateError(f"قالب Word قابل خواندن نیست: {template.path} ({exc})") from exc
 
+        replaced, unresolved = self.replace_in_document(document, values)
+        self._save_atomic(document, output)
+        warnings = list(template.warnings)
+        if unresolved:
+            warnings.append(
+                "برای این جایگاه‌ها مقدار معتبر پیدا نشد و متن اصلی حفظ شد: "
+                + "، ".join(sorted(unresolved))
+            )
+        return TemplateRenderResult(
+            output_path=output,
+            replaced=replaced,
+            unresolved_placeholders=tuple(sorted(unresolved)),
+            warnings=warnings,
+        )
+
+    def replace_in_document(
+        self,
+        document: Any,
+        values: dict[str, str],
+    ) -> tuple[int, set[str]]:
+        """Replace placeholders in an already-open document.
+
+        Returns the replacement count and the keys that had no validated value.
+        Shared with :class:`~local_office_ai.reporting.docx_report_writer.DocxReportWriter`
+        so template mode uses exactly the same tested replacement rules.
+        """
+
         state = _RenderState(values=values)
         self._replace_in_paragraphs(document.paragraphs, state)
         for table in document.tables:
@@ -79,20 +106,7 @@ class DocxTemplateRenderer:
                 self._replace_in_paragraphs(container.paragraphs, state)
                 for table in container.tables:
                     self._replace_in_table(table, state)
-
-        self._save_atomic(document, output)
-        warnings = list(template.warnings)
-        if state.unresolved:
-            warnings.append(
-                "برای این جایگاه‌ها مقدار معتبر پیدا نشد و متن اصلی حفظ شد: "
-                + "، ".join(sorted(state.unresolved))
-            )
-        return TemplateRenderResult(
-            output_path=output,
-            replaced=state.replaced,
-            unresolved_placeholders=tuple(sorted(state.unresolved)),
-            warnings=warnings,
-        )
+        return state.replaced, set(state.unresolved)
 
     @staticmethod
     def _document_class() -> Any:
