@@ -11,7 +11,7 @@
   is open and not merged to `main`.
 - Prompt 04B was merged to `main` as PR #11 (`8f77c25`).
 - Prompt 05A is implemented on `feature/prompt-05a-quality-gate-provenance`, created
-  from `main` at `8f77c25`.
+  from `main` at `8f77c25`; PR #12 is open and not merged.
 - The three original administrative source files and the private sample workbook are
   intentionally not stored in GitHub.
 
@@ -25,7 +25,7 @@ and merged. Prompt 01B, Prompt 02A, Prompt 02B, Prompt 03B, Prompt 04A and Promp
 are merged. Prompt 03A remains on its branch and PR #8.
 
 **Prompt 05A — Quality Gate Architecture and Data Provenance — is implemented on
-`feature/prompt-05a-quality-gate-provenance`.** It adds:
+`feature/prompt-05a-quality-gate-provenance`; PR #12 is open.** It adds:
 
 - `quality/models.py` — one `PASS` / `WARNING` / `FAIL` model over the thirteen required
   stages, `GateFinding`, `GateStageResult`, `QualityGateReport`, and the machine-readable

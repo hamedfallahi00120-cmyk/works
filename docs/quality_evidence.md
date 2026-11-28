@@ -9,7 +9,8 @@ Prompt 02B (Statistical Reconciliation and Calculation Integrity) as PR #7, Prom
 (Duplicate Detection, Derived Sheets, and Safe Aggregation) as PR #9, Prompt 04A (Output
 Format Routing and Word Template Architecture) as PR #10 and Prompt 04B (DOCX Report
 Writer and Persian RTL Rendering) as PR #11. **Prompt 05A (Quality Gate Architecture and
-Data Provenance) is implemented on `feature/prompt-05a-quality-gate-provenance`.**
+Data Provenance) is implemented on `feature/prompt-05a-quality-gate-provenance`; PR #12
+is open and not merged.**
 Evidence for each stage is recorded at the end of this file.
 
 ## Verified repository state

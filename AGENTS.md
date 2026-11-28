@@ -43,7 +43,8 @@ is implemented on `feature/prompt-03a-semantic-source-matching`; the branch is p
 origin and PR #8 is open, but it is not merged to `main`. Prompt 03B was merged to
 `main` as PR #9 (`18fb3d4`), Prompt 04A was merged as PR #10 (`4741a98`), and
 Prompt 04B was merged as PR #11 (`8f77c25`). **Prompt 05A is implemented on
-`feature/prompt-05a-quality-gate-provenance` and is not merged to `main` yet.**
+`feature/prompt-05a-quality-gate-provenance`; PR #12 is open and it is not merged to
+`main` yet.**
 See the sections below.
 
 ### Prompt 01A extraction model
