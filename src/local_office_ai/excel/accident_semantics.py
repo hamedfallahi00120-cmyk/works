@@ -331,6 +331,26 @@ def build_accident_semantics(analysis: Any, *, source: str = "") -> AccidentSema
             _inspect_block(block, report)
 
     report.tables = len(accident_blocks)
+    for metric in report.metrics:
+        if metric.kind not in {KIND_FATALITY, KIND_INJURY}:
+            continue
+        text = _normalize(metric.label)
+        if _has(text, _ACCIDENT_WORDS) or _has(text, _PERSON_WORDS):
+            continue
+        report.findings.append(
+            AccidentFinding(
+                code="ambiguous_severity_label",
+                status=STATUS_WARNING,
+                message=(
+                    f"برچسب «{metric.label}» فقط شدت را بیان می‌کند و مشخص نمی‌کند "
+                    "«تعداد تصادف» است یا «تعداد افراد»؛ با تعداد فوت‌شدگان/مجروحان "
+                    "یکی گرفته نمی‌شود و نیاز به تأیید دارد."
+                ),
+                sheet=metric.sheet,
+                block=metric.block,
+                evidence={"kind": metric.kind, "address": metric.address},
+            )
+        )
     if report.tables:
         missing = [
             description
@@ -429,7 +449,22 @@ def _inspect_block(block: Any, report: AccidentSemanticReport) -> None:
         )
 
     if measure_columns and labels:
-        _check_declared_total(block, cells, measure_columns, total_rows, report)
+        if overlap_labels:
+            report.findings.append(
+                AccidentFinding(
+                    code="declared_total_not_summed",
+                    status=STATUS_WARNING,
+                    message=(
+                        "ردیف «جمع/کل» به اجزا جمع نشد؛ دسته‌های هم‌پوشان مانند «سایر» "
+                        "بدون اثبات استقلال قابل جمع نیستند."
+                    ),
+                    sheet=getattr(block, "sheet", ""),
+                    block=getattr(block, "block_id", ""),
+                    evidence={"overlap_labels": overlap_labels},
+                )
+            )
+        else:
+            _check_declared_total(block, cells, measure_columns, total_rows, report)
 
 
 def _check_declared_total(

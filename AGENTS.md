@@ -146,7 +146,7 @@ truncated.
 - The audit profile writes «نقش‌های معنایی» and «کیفیت داده (تفصیلی)» (with a block
   column); the clean profile never does. The clean «اعتبارسنجی داده» sheet shows a compact
   quality summary and only non-`PASS` findings.
-- `tests/test_semantic_quality.py` (23 tests) covers numeric identifiers versus measures,
+- `tests/test_semantic_quality.py` (24 tests) covers numeric identifiers versus measures,
   date/year/month keys versus measures, missing values, invalid numeric content,
   unexpected text, negative values, unit inconsistencies, conflicting periods,
   duplicate identifiers and record numbers, administrative/vehicle/region and plural code
@@ -251,7 +251,7 @@ truncated.
 - `report_writer.py` / `generic_report.py` — the audit profile writes
   «تطبیق معنایی منابع» with Persian period/unit labels and period status; the clean
   profile never writes it.
-- `tests/test_semantic_matching.py` (23 tests) covers the seven required cases with real
+- `tests/test_semantic_matching.py` (24 tests) covers the seven required cases with real
   openpyxl workbooks, category-value overlap (probable, not definitive), shared
   identifier values, aggregation-label rejection, a configured synonym mapping equivalent categories,
   reordered tables with an extra descriptive column, conflicting periods, month titles under a year-only sheet name
@@ -381,7 +381,7 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
 - `excel/report_writer.py`, `excel/mixed_report_writer.py` and
   `FolderReportWriter.build_folder` validate `.xlsx` at the writer boundary, so a
   mismatched suffix cannot reach a workbook writer.
-- `tests/test_report_output_formats.py` (23 tests) uses real openpyxl workbooks and real
+- `tests/test_report_output_formats.py` (24 tests) uses real openpyxl workbooks and real
   python-docx templates: format tokens/suffixes, explicit/suffix/request/default routing,
   conflicts, extension validation, PDF rejection, template inspection (layout, margins,
   styles, headings, tables, headers/footers, numbering, RTL), placeholder detection across
@@ -520,13 +520,17 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
   (`شاخص | 1404 | 1405`) are compared per indicator. Values stay `Decimal`; absolute
   change and percent change are computed only when both periods exist and the baseline is
   non-zero; a missing side yields `WARNING`, never zero. Declared total rows are kept as
-  `role="total"` comparisons and are never added to components. A month sheet whose
-  columns repeat one metric base (`تعداد کل | 1403 | 1404`) is not treated as row
-  indicators; that shape stays a monthly series.
+  `role="total"` comparisons and are never added to components. Comparisons are grouped
+  per source file; observations from two files are never pooled into one previous/current
+  pair. A month sheet whose columns repeat one metric base (`تعداد کل | 1403 | 1404`)
+  stays a monthly series only when its row labels really are months; a region/indicator
+  table with repeated «تعداد» over years still yields row indicators.
 - `excel/accident_semantics.py` — separates `accident_count`, `fatal_accident_count`,
   `fatality_count`, `injury_accident_count`, `injury_count` and `damage`; verifies
   declared totals only against independent components; reports missing casualty
-  statistics by name instead of equating fatal accidents with fatalities.
+  statistics by name instead of equating fatal accidents with fatalities. A bare severity
+  label (`فوتی`, `جرحی`) is flagged as ambiguous rather than silently treated as a person
+  count.
 - `reporting/multi_source.py` — validated Persian report content for folder and
   multi-source runs: source status, cross-period indicator comparisons with cell
   addresses, semantic matching, duplicate/aggregation decisions, exclusions, statistical
@@ -544,24 +548,35 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
 - `quality/acceptance.py` — `AcceptanceRunner` performs the declared-input run, builds
   the DOCX, reopens/validates it, checks grounded numbers, provenance and the quality
   gate, verifies optional historical checkpoints against independently extracted values,
-  and writes a fifteen-section JSON/Markdown audit. Final status is `accepted`,
-  `partial`, `failed` or `unverified`; a skipped input, unreadable file, ignored block,
-  unidentified period, critical `FAIL`, wrong format, invalid DOCX or unverified numeric
-  claim can never be reported as accepted.
+  and writes a fifteen-section JSON/Markdown audit with semantic roles, per-source
+  comparisons, cross-source row-indicator matches, duplicate decisions, accident findings
+  and provenance samples. A checkpoint needs an exact normalized label (or explicit
+  alias); a near label or a label repeated across files is `UNVERIFIED`. Final status is
+  `accepted`, `partial`, `failed` or `unverified`; a skipped input, unreadable file,
+  ignored block, unidentified period, critical `FAIL`, wrong format, invalid DOCX or
+  unverified numeric claim can never be reported as accepted. Acceptance requires DOCX;
+  an XLSX/PDF output is `failed`.
 - `ui/cli.py` — `--acceptance`, repeatable `--acceptance-input`, `--checkpoints` and
   `--acceptance-dir`; exit codes 0 accepted, 3 partial, 4 failed, 5 unverified.
   `--folder` now accepts `--format docx` and an optional template.
+- `excel/statistical_reconciliation.py` — two component labels that both contain an
+  overlap word (`سایر`, `متفرقه`, `other`) are not a justified sum; the evidence records
+  the overlap and the result is not `PASS`.
 - `excel/structure_intelligence.py` / `excel/period_integration.py` — a row-oriented
   period table is kept out of the monthly metric grid so no metric named `1404/1405` is
   invented and no false incomplete-month warning is raised.
-- `excel/sheet_analyzer.py` — a label plus at least two plausible reporting-year columns
-  is a valid header; a totals row (`جمع | 1404 | 1500`) is not promoted to a header.
-- `tests/test_end_to_end_acceptance.py` (15 tests) uses real openpyxl workbooks and real
+- `excel/sheet_analyzer.py` — a label plus at least two plausible reporting-period
+  columns is a valid header, including periods embedded in a measure header
+  (`شاخص | تعداد 1404 | تعداد 1405`); a totals row (`جمع | 1404 | 1500`) is not promoted
+  to a header.
+- `tests/test_end_to_end_acceptance.py` (24 tests) uses real openpyxl workbooks and real
   DOCX packages: period header detection, totals-row rejection, per-indicator comparison,
-  zero baseline, accident/casualty separation, missing casualty statistics, valid
-  multi-source DOCX, template-mode folder DOCX, PDF rejection, accepted acceptance, CLI
-  exit code, unverified missing input, checkpoint mismatch without forcing the report,
-  conflicting-period failure and audit files for a partial run.
+  zero baseline, accident/casualty separation, ambiguous severity labels, missing
+  casualty statistics, overlapping `سایر` labels, valid multi-source DOCX, template-mode
+  folder DOCX, PDF rejection, two-Excel-plus-Word acceptance with per-source comparisons,
+  non-DOCX rejection, CLI exit code, unverified missing input, missing Word reference,
+  checkpoint mismatch/near-label without forcing the report, conflicting-period failure
+  and audit files for a partial run.
 - Known limits and honest status: the two named workbooks and the old Word document are
   not in this repository. The sandbox run uses synthetic workbooks only to exercise the
   pipeline and the checkpoint mechanism; it is **not** independent verification of the

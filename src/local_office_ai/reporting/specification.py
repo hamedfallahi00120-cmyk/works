@@ -927,6 +927,7 @@ class ReportGenerationResult:
     placeholders_resolved: tuple[str, ...] = ()
     unresolved_placeholders: tuple[str, ...] = ()
     warnings: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
     content_validated: bool = True
     evidence: tuple[str, ...] = ()
     mode: str = ""
@@ -947,6 +948,7 @@ class ReportGenerationResult:
             "placeholders_resolved": list(self.placeholders_resolved),
             "unresolved_placeholders": list(self.unresolved_placeholders),
             "warnings": list(self.warnings),
+            "notes": list(self.notes),
             "content_validated": self.content_validated,
             "evidence": list(self.evidence),
             "mode": self.mode,

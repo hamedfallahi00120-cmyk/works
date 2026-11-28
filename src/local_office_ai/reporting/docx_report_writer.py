@@ -58,6 +58,7 @@ class DocxReportResult:
     unresolved_placeholders: tuple[str, ...] = ()
     removed_static_figures: tuple[str, ...] = ()
     warnings: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
     validation: DocxValidation | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -70,6 +71,7 @@ class DocxReportResult:
             "unresolved_placeholders": list(self.unresolved_placeholders),
             "removed_static_figures": list(self.removed_static_figures),
             "warnings": list(self.warnings),
+            "notes": list(self.notes),
             "validation": self.validation.to_dict() if self.validation else None,
         }
 
@@ -230,23 +232,24 @@ class DocxReportWriter:
         if anchor is not None and anchor_only:
             _remove_paragraph(anchor)
 
-        warnings: list[str] = list(template.warnings)
+        notes: list[str] = list(template.warnings)
+        warnings: list[str] = []
         if unresolved:
             warnings.append(
                 "برای این جایگاه‌ها مقدار معتبر پیدا نشد و متن اصلی حفظ شد: "
                 + "، ".join(sorted(unresolved))
             )
         if removed:
-            warnings.append(
+            notes.append(
                 f"{len(removed)} عدد ثابت قالب به‌عنوان داده تاریخی حذف شد: "
                 + "، ".join(removed[:10])
             )
         if self._skipped_template_sections:
-            warnings.append(
+            notes.append(
                 "این بخش‌ها یا جدول‌ها در قالب از قبل وجود داشتند و برای جلوگیری از تکرار دوباره ساخته نشدند: "
                 + "، ".join(self._skipped_template_sections)
             )
-        warnings.append(
+        notes.append(
             "قالب Word فقط برای چیدمان استفاده شد؛ هیچ عددی از قالب به‌عنوان داده گزارش پذیرفته نشد."
             if strip_static_figures
             else "اعداد ثابت قالب فقط به‌عنوان مرجع تاریخی نگه داشته شدند و داده گزارش نیستند."
@@ -268,6 +271,7 @@ class DocxReportWriter:
             unresolved_placeholders=tuple(sorted(unresolved)),
             removed_static_figures=tuple(removed),
             warnings=warnings,
+            notes=notes,
         )
 
     # ------------------------------------------------------------------ #

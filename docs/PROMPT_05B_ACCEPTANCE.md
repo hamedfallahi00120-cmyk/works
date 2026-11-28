@@ -50,14 +50,23 @@ its historical numbers are stripped from generated content.
 3. Every worksheet and detected block is reported, including cell caps.
 4. Periods are reported per file from block evidence when the monthly grid is not
    applicable.
-5. Semantic matching decisions and row-oriented period comparisons are counted.
+5. Semantic matching decisions and row-oriented period comparisons are counted; row
+   comparisons stay inside one source file, and equivalent row indicators across files
+   are listed as matches without pretending they are numerically comparable.
 6. Duplicate/overlap groups, blocked aggregation decisions and exclusions are reported.
 7. Statistical reconciliation results and failed/warning checks are listed.
 8. Provenance coverage is measured on required records, not optional metadata alone.
 9. The generated file is the requested format, reopened and validated (ZIP, XML,
    python-docx, RTL, PAGE field, headers, unresolved placeholders, grounded numbers).
 10. Historical checkpoints are compared only with independently extracted values; a
-    mismatch is reported, never repaired, and never inserted into the report.
+    mismatch is reported, never repaired, and never inserted into the report. Only an
+    exact normalized label (or an explicitly supplied alias) can confirm a checkpoint;
+    a near label or a label repeated across files without a unique cross-file period
+    pair is `unverified`. When a checkpoint label exists in two different files, the
+    runner may compare the earliest period in one file with the latest period in the
+    other **for verification only**; that comparison is never inserted into the report,
+    and the audit records that equality of scope/definition between the two files still
+    needs the owner's confirmation.
 
 `accepted` requires: all sources processed, all blocks extracted, periods identified,
 all gate stages PASS, correct format, valid DOCX, all numbers grounded, provenance
@@ -70,10 +79,10 @@ Environment: Linux, CPython 3.13.15, pytest 9.2.0, openpyxl, python-docx.
 
 ```text
 python -m pytest tests/test_end_to_end_acceptance.py -o addopts="" -q
--> 15 passed in 3.50s
+-> 24 passed in 6.02s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 369 passed, 6 skipped, 36 deselected in 51.72s
+-> 378 passed, 6 skipped, 36 deselected in 54.64s
 ```
 
 Synthetic workbook (`شاخص | 1404 | 1405`) produced:

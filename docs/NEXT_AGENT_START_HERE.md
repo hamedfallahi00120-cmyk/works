@@ -56,9 +56,10 @@ Recorded sandbox evidence (Linux, CPython 3.13.15, pytest 9.2.0):
 
 **Prompt 05B — End-to-End Acceptance Testing and False-Success Prevention — is
 implemented on `feature/prompt-05b-end-to-end-acceptance`.** It adds row-oriented
-indicator/period comparison, accident/casualty separation, folder DOCX delivery, the
-`AcceptanceRunner` with a fifteen-section audit, and explicit `partial`/`failed`/
-`unverified` outcomes. The real input files were absent from this sandbox; no real-file
+indicator/period comparison grouped per source file, cross-source row-indicator matching,
+accident/casualty separation with ambiguous severity labels, folder DOCX delivery, the
+`AcceptanceRunner` with a fifteen-section evidence audit, exact-label checkpoint checks,
+and explicit `partial`/`failed`/`unverified` outcomes. The real input files were absent from this sandbox; no real-file
 acceptance is claimed. See `docs/PROMPT_05B_ACCEPTANCE.md`.
 
 ```text
@@ -66,10 +67,10 @@ python -m pytest tests/test_quality_gate.py -o addopts="" -q
 -> 9 passed in 2.06s
 
 python -m pytest tests/test_end_to_end_acceptance.py -o addopts="" -q
--> 15 passed in 3.50s
+-> 24 passed in 6.02s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 369 passed, 6 skipped, 36 deselected in 51.72s
+-> 378 passed, 6 skipped, 36 deselected in 54.64s
 ```
 
 The 36 deselected tests are `requires_sample`; their private workbook is absent and they

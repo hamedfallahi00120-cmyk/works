@@ -370,21 +370,31 @@ def _run_acceptance(settings, args) -> int:
         settings,
         progress=(lambda message: None) if args.quiet else print,
     )
-    report = runner.run(
-        inputs,
-        request=args.request or args.goal or args.question or "گزارش مدیریتی چندمنبعی",
-        output=args.output,
-        output_dir=args.acceptance_dir,
-        template=args.template,
-        checkpoints=checkpoints,
-        use_ai=not args.no_ai,
-    )
+    try:
+        report = runner.run(
+            inputs,
+            request=args.request or args.goal or args.question or "گزارش مدیریتی چندمنبعی",
+            output=args.output,
+            output_dir=args.acceptance_dir,
+            template=args.template,
+            checkpoints=checkpoints,
+            use_ai=not args.no_ai,
+            output_format=args.output_format or "docx",
+        )
+    except (ReportFormatError, ReportTemplateError) as exc:
+        print(f"خطا: {exc}", file=sys.stderr)
+        return 2
     print("")
     print(f"وضعیت پذیرش: {report.status_label}")
     for check in report.checks:
         print(f"  [{check.status}] {check.code}: {check.message}")
-    output_dir = Path(args.acceptance_dir) if args.acceptance_dir else settings.output_dir
-    json_path, markdown_path = report.write(output_dir)
+    if report.artifacts:
+        json_path = report.artifacts.get("json", "")
+        markdown_path = report.artifacts.get("markdown", "")
+    else:
+        output_dir = Path(args.acceptance_dir) if args.acceptance_dir else settings.output_dir
+        written_json, written_markdown = report.write(output_dir)
+        json_path, markdown_path = str(written_json), str(written_markdown)
     print(f"گزارش حسابرسی JSON: {json_path}")
     print(f"گزارش حسابرسی Markdown: {markdown_path}")
     for error in report.errors:

@@ -179,6 +179,7 @@ class IndicatorComparison:
     note: str = ""
     source: str = ""
     role: str = "data"
+    row_label: str = ""
 
     @property
     def status_label(self) -> str:
@@ -229,21 +230,100 @@ class IndicatorPeriodReport:
     blocked_blocks: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
+    def cross_source_comparison(self, label: str) -> IndicatorComparison | None:
+        """Compare the earliest and latest period across two different files.
+
+        This is a verification-only probe.  It refuses ties, a single file, a
+        zero-period gap and same-period duplicates, so it never pairs one file's
+        previous period with another file's current period for the report itself.
+        """
+
+        key = normalize_text(normalize_digits(label))
+        observations = [
+            item
+            for item in self.observations
+            if key
+            and key
+            in {
+                normalize_text(normalize_digits(item.indicator)),
+                normalize_text(normalize_digits(item.row_label)),
+            }
+            and item.value is not None
+        ]
+        by_period: dict[str, list[IndicatorObservation]] = {}
+        for item in observations:
+            by_period.setdefault(item.period, []).append(item)
+        periods = sorted(by_period, key=_period_sort_key)
+        if len(periods) < 2:
+            return None
+        previous_period, current_period = periods[0], periods[-1]
+        previous = by_period[previous_period]
+        current = by_period[current_period]
+        if len(previous) != 1 or len(current) != 1:
+            return None
+        first, last = previous[0], current[0]
+        if first.source == last.source:
+            return None
+        comparison = IndicatorComparison(
+            indicator=first.indicator,
+            measure=first.measure or last.measure,
+            previous_period=previous_period,
+            current_period=current_period,
+            previous=first.value,
+            current=last.value,
+            previous_address=first.address,
+            current_address=last.address,
+            sheet=first.sheet,
+            block=first.block,
+            unit=first.unit or last.unit,
+            source=f"{first.source} → {last.source}",
+            role="total" if "total" in {first.role, last.role} else "data",
+            row_label=first.row_label or last.row_label,
+            note=(
+                "مقایسه بین دو فایل فقط برای تأیید checkpoint است؛ "
+                "در گزارش به‌عنوان یک سری واحد استفاده نمی‌شود."
+            ),
+        )
+        comparison.difference = last.value - first.value
+        if first.value == ZERO:
+            comparison.status = STATUS_ZERO_BASELINE
+        else:
+            comparison.percent = (
+                comparison.difference / abs(first.value) * HUNDRED
+            ).quantize(Decimal("0.01"))
+            comparison.status = STATUS_COMPARED
+        return comparison
+
+    def exact_comparisons(self, label: str) -> list[IndicatorComparison]:
+        key = normalize_text(normalize_digits(label))
+        return [
+            item
+            for item in self.comparisons
+            if key
+            and key
+            in {
+                normalize_text(normalize_digits(item.indicator)),
+                normalize_text(normalize_digits(item.row_label)),
+            }
+        ]
+
     def comparison(self, label: str) -> IndicatorComparison | None:
         """Find one indicator by normalized label, exact first then near match."""
 
         key = normalize_text(normalize_digits(label))
-        exact = [
-            item
-            for item in self.comparisons
-            if normalize_text(normalize_digits(item.indicator)) == key
-        ]
+        exact = self.exact_comparisons(label)
         if len(exact) == 1:
             return exact[0]
         best: tuple[float, IndicatorComparison] | None = None
         for item in self.comparisons:
-            candidate = normalize_text(normalize_digits(item.indicator))
-            score = SequenceMatcher(None, key, candidate).ratio()
+            candidates = {
+                normalize_text(normalize_digits(item.indicator)),
+                normalize_text(normalize_digits(item.row_label)),
+            }
+            score = max(
+                (SequenceMatcher(None, key, candidate).ratio() for candidate in candidates),
+                default=0.0,
+            )
             if best is None or score > best[0]:
                 best = (score, item)
         if best is not None and best[0] >= 0.85:
@@ -350,10 +430,6 @@ def _collect_block(block: Any, report: IndicatorPeriodReport) -> None:
         _base_label(str(column.header or ""), period)
         for column, period in period_columns
     }
-    if len(bases) == 1 and "" not in bases:
-        # One metric repeated per period is a monthly series, not row indicators.
-        return
-
     label_columns = [
         column
         for column in columns
@@ -368,6 +444,18 @@ def _collect_block(block: Any, report: IndicatorPeriodReport) -> None:
             }
         )
         return
+
+    if len(bases) == 1 and "" not in bases:
+        # A repeated measure is a monthly series only when its row labels really are
+        # months.  A region/indicator table may also repeat «تعداد» over years.
+        preview = _row_labels(block, label_columns)
+        month_like = 0
+        for value in preview.values():
+            parsed = parse_period(value)
+            if parsed is not None and parsed.month is not None:
+                month_like += 1
+        if preview and month_like >= max(1, int(len(preview) * 0.6)):
+            return
 
     boundaries = getattr(block, "boundaries", {}) or {}
     first_row = int(boundaries.get("first_data_row") or 0)
@@ -446,12 +534,14 @@ def _collect_block(block: Any, report: IndicatorPeriodReport) -> None:
 
 
 def _comparisons(observations: list[IndicatorObservation]) -> list[IndicatorComparison]:
-    grouped: dict[tuple[str, str], list[IndicatorObservation]] = {}
+    grouped: dict[tuple[str, str, str], list[IndicatorObservation]] = {}
     for item in observations:
-        grouped.setdefault((item.indicator, item.unit), []).append(item)
+        # A comparison must stay inside one source: pooling two files would pair
+        # one file's previous period with another file's current period.
+        grouped.setdefault((item.source, item.indicator, item.unit), []).append(item)
 
     comparisons: list[IndicatorComparison] = []
-    for (indicator, unit), items in grouped.items():
+    for (_source, indicator, unit), items in grouped.items():
         periods = sorted({item.period for item in items}, key=_period_sort_key)
         if len(periods) < 2:
             continue
@@ -475,6 +565,9 @@ def _comparisons(observations: list[IndicatorObservation]) -> list[IndicatorComp
                 "total"
                 if any(item.role == "total" for item in items)
                 else "data"
+            ),
+            row_label=(
+                previous.row_label if previous else (current.row_label if current else "")
             ),
         )
         if previous is None or previous.value is None:

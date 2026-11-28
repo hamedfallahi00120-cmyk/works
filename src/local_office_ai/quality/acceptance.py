@@ -24,7 +24,10 @@ from typing import Any, Callable, Iterable, Sequence
 from local_office_ai.app.folder_workflow import FolderWorkflow
 from local_office_ai.core.logging_config import get_logger
 from local_office_ai.core.settings import Settings
-from local_office_ai.excel.indicator_periods import IndicatorPeriodReport
+from local_office_ai.excel.indicator_periods import (
+    IndicatorPeriodReport,
+    build_indicator_periods,
+)
 from local_office_ai.excel.normalization import normalize_digits, normalize_text
 from local_office_ai.quality import GateStatus
 from local_office_ai.reporting.docx_validation import validate_docx_output
@@ -189,6 +192,9 @@ class AcceptanceReport:
     worksheets: list[dict[str, Any]] = field(default_factory=list)
     blocks: list[dict[str, Any]] = field(default_factory=list)
     periods: list[dict[str, Any]] = field(default_factory=list)
+    semantics: list[dict[str, Any]] = field(default_factory=list)
+    comparisons: list[dict[str, Any]] = field(default_factory=list)
+    cross_source_matches: list[dict[str, Any]] = field(default_factory=list)
     matching: dict[str, Any] = field(default_factory=dict)
     ambiguous: list[dict[str, Any]] = field(default_factory=list)
     duplicates: dict[str, Any] = field(default_factory=dict)
@@ -196,6 +202,7 @@ class AcceptanceReport:
     checks: list[FalseSuccessCheck] = field(default_factory=list)
     provenance: dict[str, Any] = field(default_factory=dict)
     outputs: dict[str, Any] = field(default_factory=dict)
+    artifacts: dict[str, Any] = field(default_factory=dict)
     docx: dict[str, Any] = field(default_factory=dict)
     accidents: dict[str, Any] = field(default_factory=dict)
     checkpoints: list[CheckpointResult] = field(default_factory=list)
@@ -235,6 +242,9 @@ class AcceptanceReport:
             "worksheets": list(self.worksheets),
             "blocks": list(self.blocks),
             "periods": list(self.periods),
+            "semantics": list(self.semantics),
+            "comparisons": list(self.comparisons),
+            "cross_source_matches": list(self.cross_source_matches),
             "matching": dict(self.matching),
             "ambiguous": list(self.ambiguous),
             "duplicates": dict(self.duplicates),
@@ -242,6 +252,7 @@ class AcceptanceReport:
             "checks": [item.to_dict() for item in self.checks],
             "provenance": dict(self.provenance),
             "outputs": dict(self.outputs),
+            "artifacts": dict(self.artifacts),
             "docx": dict(self.docx),
             "accidents": dict(self.accidents),
             "checkpoints": [item.to_dict() for item in self.checkpoints],
@@ -260,6 +271,7 @@ class AcceptanceReport:
         base = target / "acceptance_report"
         json_path = base.with_suffix(".json")
         md_path = base.with_suffix(".md")
+        self.artifacts = {"json": str(json_path), "markdown": str(md_path)}
         json_path.write_text(
             json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
         )
@@ -339,6 +351,28 @@ class AcceptanceRunner:
                 f"فایل منبع موجود نیست: {item.path}" for item in missing_excel
             )
 
+        if missing_reference:
+            report.warnings.append(
+                "فایل مرجع Word اعلام‌شده موجود نیست؛ گزارش بدون قالب مرجع ساخته می‌شود."
+            )
+            report.limitations.extend(
+                f"فایل مرجع Word موجود نیست: {item.path}" for item in missing_reference
+            )
+
+        if missing_excel:
+            report.unverified_stages.extend(
+                [
+                    "پردازش همه فایل‌های Excel اعلام‌شده (فایل موجود نیست)",
+                    "تطبیق کامل شاخص‌ها میان همه منابع",
+                    "کنترل تکرار و تجمیع بین همه منابع",
+                    "تطبیق آماری و ردیابی منبع برای فایل‌های غایب",
+                ]
+            )
+        if missing_reference:
+            report.unverified_stages.append(
+                "استفاده از قالب Word مرجع (اختیاری؛ گزارش بدون قالب ساخته شد)"
+            )
+
         if reference_inputs:
             for item in reference_inputs:
                 if item.exists:
@@ -346,7 +380,7 @@ class AcceptanceRunner:
                         inspection = inspect_docx_template(item.path)
                         report.limitations.append(
                             f"فایل مرجع Word «{Path(item.path).name}» فقط از نظر ساختار بررسی شد "
-                            f"(بخش {len(inspection.sections)}، سبک {len(inspection.paragraph_styles)}، "
+                            f"(بخش {inspection.section_count}، سبک {len(inspection.styles)}، "
                             f"جدول {len(inspection.tables)}) و داده تاریخی آن وارد گزارش نشد."
                         )
                     except Exception as exc:  # noqa: BLE001 - reference is optional
@@ -356,6 +390,9 @@ class AcceptanceRunner:
 
         source_dir = Path(excel_inputs[0].path).parent
         output_path = Path(output) if output else None
+        effective_template = Path(template) if template else next(
+            (Path(item.path) for item in reference_inputs if item.exists), None
+        )
         workflow = FolderWorkflow(self.settings, progress=self.progress)
         result = None
         try:
@@ -366,7 +403,7 @@ class AcceptanceRunner:
                 output=output_path,
                 output_format=output_format,
                 sources=[item.path for item in excel_inputs],
-                template=template,
+                template=effective_template,
             )
             report.result = result
         except Exception as exc:  # noqa: BLE001 - acceptance must report, not crash
@@ -386,6 +423,8 @@ class AcceptanceRunner:
         self._checkpoints(report, result, checkpoints)
         self._false_success(report, result, output_format)
         self._final_status(report)
+        if output_dir is not None:
+            report.write(output_dir)
         return report
 
     # ------------------------------------------------------------------ #
@@ -421,6 +460,25 @@ class AcceptanceRunner:
                         "period_status": getattr(sheet, "period_status", ""),
                     }
                 )
+            semantics = getattr(analysis, "semantics", None) if analysis is not None else None
+            for semantic_block in getattr(semantics, "blocks", []) or []:
+                for column in getattr(semantic_block, "columns", []) or []:
+                    report.semantics.append(
+                        {
+                            "file": getattr(item, "name", ""),
+                            "sheet": getattr(semantic_block, "sheet", ""),
+                            "block": getattr(semantic_block, "block_id", ""),
+                            "header": getattr(column, "header", ""),
+                            "role": str(
+                                getattr(getattr(column, "role", ""), "value", "")
+                            ),
+                            "role_label": getattr(column, "role_label", ""),
+                            "statistical_role": getattr(column, "statistical_role", ""),
+                            "unit": getattr(column, "unit", ""),
+                            "period": getattr(column, "period", ""),
+                            "confidence": round(float(getattr(column, "confidence", 0.0) or 0.0), 4),
+                        }
+                    )
             for block in blocks:
                 report.blocks.append(
                     {
@@ -459,24 +517,40 @@ class AcceptanceRunner:
                 }
             )
 
+        self._match_indicators_across_sources(report, result)
+
         matching = getattr(result, "matching", None)
         if matching is not None:
             report.matching = matching.to_dict() if hasattr(matching, "to_dict") else {}
             counts = matching.counts() if hasattr(matching, "counts") else {}
+            counts["row_indicators_matched"] = sum(
+                1 for item in report.cross_source_matches if item["status"] == "matched"
+            )
+            counts["row_indicators_ambiguous"] = sum(
+                1 for item in report.cross_source_matches if item["status"] == "ambiguous"
+            )
             report.matching["counts"] = counts
-            report.ambiguous = [
-                {
-                    "label": getattr(item, "normalized_label", ""),
-                    "status": str(getattr(getattr(item, "status", ""), "value", getattr(item, "status", ""))),
-                    "members": [
-                        getattr(member, "display_label", "")
-                        for member in getattr(item, "members", []) or []
-                    ],
-                    "reason": getattr(item, "reason", ""),
-                }
-                for item in getattr(matching, "decisions", []) or []
-                if str(getattr(getattr(item, "status", ""), "value", "")) == "ambiguous"
-            ]
+            report.ambiguous.extend(
+                [
+                    {
+                        "label": getattr(item, "normalized_label", ""),
+                        "status": str(
+                            getattr(
+                                getattr(item, "status", ""),
+                                "value",
+                                getattr(item, "status", ""),
+                            )
+                        ),
+                        "members": [
+                            getattr(member, "display_label", "")
+                            for member in getattr(item, "members", []) or []
+                        ],
+                        "reason": getattr(item, "reason", ""),
+                    }
+                    for item in getattr(matching, "decisions", []) or []
+                    if str(getattr(getattr(item, "status", ""), "value", "")) == "ambiguous"
+                ]
+            )
 
         duplicate = getattr(result, "duplicate_control", None)
         if duplicate is not None:
@@ -484,6 +558,7 @@ class AcceptanceRunner:
             report.duplicates = {
                 "counts": payload.get("counts", {}),
                 "groups": payload.get("duplicate_groups", []),
+                "record_duplicates": payload.get("record_duplicates", []),
                 "decisions": [
                     {
                         "kind": getattr(item, "kind", ""),
@@ -551,6 +626,10 @@ class AcceptanceRunner:
             report.matching["indicator_periods"] = list(
                 getattr(indicators, "periods", []) or []
             )
+            report.comparisons = [
+                item.to_dict() if hasattr(item, "to_dict") else dict(item)
+                for item in getattr(indicators, "comparisons", []) or []
+            ]
 
         accidents = getattr(result, "accident_semantics", None)
         if accidents is not None:
@@ -583,6 +662,27 @@ class AcceptanceRunner:
                     and hasattr(gate.provenance, "missing_fields")
                     else {}
                 ),
+                "samples": [
+                    {
+                        "key": record.key,
+                        "label": record.original_label or record.normalized_label,
+                        "filename": record.filename,
+                        "sheet": record.sheet,
+                        "cell": record.cell,
+                        "period": record.period,
+                        "value": record.normalized_value,
+                        "operation": record.operation,
+                        "derived": record.derived,
+                        "sources": [
+                            f"{source.sheet}!{source.cell}" for source in record.sources
+                        ],
+                    }
+                    for record in (
+                        getattr(gate.provenance, "important_records", [])
+                        if getattr(gate, "provenance", None) is not None
+                        else []
+                    )[:25]
+                ],
             }
             for stage in getattr(gate, "stages", []) or []:
                 status = _status_value(getattr(stage, "status", ""))
@@ -592,8 +692,15 @@ class AcceptanceRunner:
                         f"{getattr(stage, 'summary', '')}"
                     )
 
+        template_info = getattr(getattr(result, "report", None), "template", None)
         report.outputs = {
             "path": str(getattr(result, "output_path", "") or ""),
+            "notes": list(getattr(getattr(result, "report", None), "notes", []) or []),
+            "template": (
+                str(getattr(template_info, "path", "") or "")
+                if template_info is not None
+                else ""
+            ),
             "format": (
                 getattr(getattr(result, "report", None), "output_format", None).value
                 if getattr(result, "report", None) is not None
@@ -638,6 +745,96 @@ class AcceptanceRunner:
         if not output_path.is_file():
             report.outputs["path"] = report.outputs.get("path") or str(output_path)
 
+    def _match_indicators_across_sources(
+        self, report: AcceptanceReport, result: Any
+    ) -> None:
+        grouped: dict[str, dict[str, Any]] = {}
+        for outcome in getattr(result, "files", []) or []:
+            analysis = getattr(outcome, "analysis", None)
+            if analysis is None:
+                continue
+            source = getattr(outcome, "name", "")
+            report_ind = build_indicator_periods(analysis, source=source)
+            for observation in report_ind.observations:
+                key = normalize_text(normalize_digits(observation.indicator))
+                if not key:
+                    continue
+                entry = grouped.setdefault(
+                    key,
+                    {
+                        "indicator": observation.indicator,
+                        "unit": observation.unit,
+                        "units": set(),
+                        "role": observation.role,
+                        "sources": {},
+                    },
+                )
+                if observation.unit:
+                    entry["units"].add(observation.unit)
+                source_entry = entry["sources"].setdefault(
+                    source, {"periods": [], "values": [], "addresses": []}
+                )
+                if observation.period not in source_entry["periods"]:
+                    source_entry["periods"].append(observation.period)
+                source_entry["values"].append(
+                    {
+                        "period": observation.period,
+                        "value": _text(observation.value),
+                        "address": f"{observation.sheet}!{observation.address}",
+                    }
+                )
+                source_entry["addresses"].append(
+                    f"{observation.sheet}!{observation.address}"
+                )
+        matches: list[dict[str, Any]] = []
+        for entry in grouped.values():
+            if len(entry["sources"]) < 2:
+                continue
+            units = sorted(entry["units"])
+            ambiguous = len(units) > 1
+            matches.append(
+                {
+                    "indicator": entry["indicator"],
+                    "unit": entry["unit"],
+                    "role": entry["role"],
+                    "sources": sorted(entry["sources"]),
+                    "periods": {
+                        source: sorted(values["periods"])
+                        for source, values in sorted(entry["sources"].items())
+                    },
+                    "values": {
+                        source: values["values"]
+                        for source, values in sorted(entry["sources"].items())
+                    },
+                    "status": "ambiguous" if ambiguous else "matched",
+                    "comparable": False,
+                    "reason": (
+                        "برچسب یکسان است اما واحدها متفاوت‌اند "
+                        f"({'، '.join(units)}); برابری شاخص اثبات نمی‌شود."
+                        if ambiguous
+                        else (
+                            "برچسب و واحد یکسان است؛ مقایسه عددی بین منابع فقط با "
+                            "دوره مشترک و کنترل تکرار مجاز است."
+                        )
+                    ),
+                }
+            )
+            if ambiguous:
+                report.ambiguous.append(
+                    {
+                        "label": entry["indicator"],
+                        "status": "ambiguous",
+                        "members": sorted(entry["sources"]),
+                        "reason": (
+                            "برچسب یکسان با واحدهای متفاوت: " + "، ".join(units) +
+                            "؛ تطبیق قطعی نیست."
+                        ),
+                    }
+                )
+        report.cross_source_matches = sorted(
+            matches, key=lambda item: (item["role"] != "total", item["indicator"])
+        )
+
     # ------------------------------------------------------------------ #
     def _checkpoints(
         self,
@@ -647,6 +844,10 @@ class AcceptanceRunner:
     ) -> None:
         requested = list(checkpoints)
         if not requested:
+            report.limitations.append(
+                "هیچ checkpoint تاریخی ارائه نشد؛ تأیید عددی بیرونی انجام نشد و "
+                "اتکا فقط بر ردیابی سلول منبع است."
+            )
             return
         indicators = getattr(result, "indicator_periods", None)
         if indicators is None:
@@ -657,14 +858,51 @@ class AcceptanceRunner:
             return
         for checkpoint in requested:
             candidates = [checkpoint.label, *checkpoint.aliases]
-            comparison = None
+            exact_candidates: list[Any] = []
             for candidate in candidates:
                 if not candidate:
                     continue
-                found = indicators.comparison(candidate)
-                if found is not None:
-                    comparison = found
-                    break
+                exact_candidates.extend(indicators.exact_comparisons(candidate))
+            deduped: list[Any] = []
+            for item in exact_candidates:
+                if all(item is not seen for seen in deduped):
+                    deduped.append(item)
+            exact_candidates = deduped
+            comparison = exact_candidates[0] if len(exact_candidates) == 1 else None
+            cross_source = False
+            if len(exact_candidates) > 1:
+                for candidate in candidates:
+                    if not candidate:
+                        continue
+                    found = indicators.cross_source_comparison(candidate)
+                    if found is not None:
+                        comparison = found
+                        cross_source = True
+                        break
+                if comparison is None:
+                    report.checkpoints.append(
+                        CheckpointResult(
+                            label=checkpoint.label,
+                            status=CHECK_UNVERIFIED,
+                            expected_previous=checkpoint.previous,
+                            expected_current=checkpoint.current,
+                            expected_percent=checkpoint.reported_percent,
+                            note=(
+                                f"این برچسب در {len(exact_candidates)} فایل/منبع تکرار شده "
+                                "است و یک جفت دوره یکتا بین دو فایل وجود ندارد؛ "
+                                "برای تأیید، منبع یا برچسب یکتا لازم است."
+                            ),
+                        )
+                    )
+                    continue
+            if comparison is None:
+                for candidate in candidates:
+                    if not candidate:
+                        continue
+                    found = indicators.comparison(candidate)
+                    if found is not None:
+                        comparison = found
+                        break
             item = CheckpointResult(
                 label=checkpoint.label,
                 status=CHECK_UNVERIFIED,
@@ -676,6 +914,15 @@ class AcceptanceRunner:
             if comparison is None:
                 report.checkpoints.append(item)
                 continue
+            comparison_labels = {
+                normalize_text(normalize_digits(comparison.indicator)),
+                normalize_text(normalize_digits(comparison.row_label)),
+            }
+            exact_label = any(
+                normalize_text(normalize_digits(candidate)) in comparison_labels
+                for candidate in candidates
+                if candidate
+            )
             item.matched_indicator = comparison.indicator
             item.extracted_previous = comparison.previous
             item.extracted_current = comparison.current
@@ -703,9 +950,26 @@ class AcceptanceRunner:
             if mismatches:
                 item.status = CHECK_FAIL
                 item.note = "اختلاف واقعی ثبت شد و برای بررسی گزارش می‌شود: " + "؛ ".join(mismatches)
+            elif not exact_label:
+                item.status = CHECK_UNVERIFIED
+                item.note = (
+                    f"برچسب checkpoint دقیقاً با «{comparison.indicator}» یکی نیست؛ "
+                    "این تطبیق نزدیک برای تأیید کافی نیست. برچسب دقیق یا alias بدهید."
+                )
             else:
                 item.status = CHECK_PASS
                 item.note = "مقدار استخراج‌شده با checkpoint هم‌خوان است."
+                if cross_source:
+                    item.note += (
+                        f" (مقایسه بین منابع: {comparison.source}؛ "
+                        f"{comparison.previous_period}→{comparison.current_period})"
+                    )
+                    limitation = (
+                        "تأیید checkpoint از دو فایل انجام شد؛ برابری دامنه، تعریف شاخص "
+                        "و پوشش دوره بین دو فایل باید توسط کاربر تأیید شود."
+                    )
+                    if limitation not in report.limitations:
+                        report.limitations.append(limitation)
             report.checkpoints.append(item)
 
     # ------------------------------------------------------------------ #
@@ -716,14 +980,18 @@ class AcceptanceRunner:
         requested_format: str,
     ) -> None:
         add = report.checks.append
-        missing_excel = [item for item in report.inputs if item.kind == "excel" and not item.exists]
-        if missing_excel:
+        missing_inputs = [item for item in report.inputs if not item.exists]
+        missing_excel = [item for item in missing_inputs if item.kind == "excel"]
+        if missing_inputs:
             add(
                 FalseSuccessCheck(
                     "source_file_skipped",
                     CHECK_FAIL,
                     "برخی فایل‌های منبع موجود نیستند؛ پردازش کامل و پذیرش سرتاسری ممکن نیست.",
-                    {"missing": [item.path for item in missing_excel]},
+                    {
+                        "missing": [item.path for item in missing_inputs],
+                        "missing_excel": [item.path for item in missing_excel],
+                    },
                 )
             )
         else:
@@ -904,13 +1172,12 @@ class AcceptanceRunner:
         generation = getattr(result, "report", None)
         output_format = getattr(generation, "output_format", None)
         output_path = str(getattr(generation, "output_path", "") or "")
-        expected = OutputFormat.DOCX if requested_format.lower() == "docx" else None
+        expected = OutputFormat.DOCX
         format_ok = (
             generation is not None
-            and output_format is not None
-            and (expected is None or output_format is expected)
-            and Path(output_path).suffix.lower()
-            == (output_format.extension if output_format is not None else "")
+            and output_format is expected
+            and requested_format.lower() == expected.value
+            and Path(output_path).suffix.lower() == expected.extension
         )
         add(
             FalseSuccessCheck(
@@ -920,7 +1187,10 @@ class AcceptanceRunner:
                     f"قالب خروجی {getattr(output_format, 'value', '')} با پسوند "
                     f"{Path(output_path).suffix} درست است."
                     if format_ok
-                    else "قالب یا پسوند خروجی با درخواست هم‌خوان نیست."
+                    else (
+                        "پذیرش سرتاسری فقط خروجی DOCX را می‌پذیرد؛ قالب یا پسوند "
+                        "خروجی با این قرارداد هم‌خوان نیست."
+                    )
                 ),
                 {
                     "requested": requested_format,
@@ -934,6 +1204,10 @@ class AcceptanceRunner:
         errors = list(validation.get("errors", []) or [])
         reopen = report.docx.get("reopen") or {}
         errors.extend(item for item in reopen.get("errors", []) or [] if item not in errors)
+        if not validation:
+            errors.append(
+                "اعتبارسنجی محتوای نویسنده در دسترس نیست؛ ادعای عددی سند تأیید نشده است."
+            )
         valid = bool(report.docx.get("valid")) and not errors
         add(
             FalseSuccessCheck(
@@ -1250,11 +1524,11 @@ def render_markdown(report: AcceptanceReport) -> str:
     blocked = list(
         getattr(getattr(report.result, "indicator_periods", None), "blocked_blocks", []) or []
     )
-    lines.append(f"از {len(report.blocks)} بلوک شناسایی‌شده، همه در مدل استخراج ثبت شدند.")
+    lines.append(f"{len(report.blocks)} بلوک در مدل استخراج ثبت شد.")
     if truncated or blocked:
         lines.append(
-            f"- برش سلول: {len(truncated)} بلوک | بلوک بدون برچسب شاخص: {len(blocked)} "
-            "(در محدودیت‌ها آمده است)."
+            f"- برش سلول: {len(truncated)} بلوک | بلوک دوره‌ای بدون برچسب شاخص: {len(blocked)} "
+            "(به‌عنوان محدودیت یا بررسی هشدار ثبت شده است)."
         )
     lines.append("")
 
@@ -1277,15 +1551,120 @@ def render_markdown(report: AcceptanceReport) -> str:
         lines.append("دوره‌ای شناسایی نشد.")
     lines.append("")
 
-    lines.append("## ۷. شاخص‌های تطبیق‌داده‌شده")
+    lines.append("## ۷. شاخص‌های تطبیق‌داده‌شده و نقش‌های معنایی")
     counts = (report.matching or {}).get("counts", {})
     lines.append(
         f"- تطبیق قطعی: {counts.get('matched', 0)} | احتمالی: {counts.get('probable', 0)} | "
-        f"مبهم: {counts.get('ambiguous', 0)} | رد‌شده: {counts.get('rejected', 0)}"
+        f"مبهم ستونی: {counts.get('ambiguous', 0)} | رد‌شده: {counts.get('rejected', 0)} | "
+        f"شاخص ردیفی مشترک بین منابع: {counts.get('row_indicators_matched', 0)} | "
+        f"شاخص ردیفی مبهم: {counts.get('row_indicators_ambiguous', 0)}"
     )
     lines.append(f"- مقایسه شاخص ردیفی بین دو دوره: {report.matching.get('indicator_comparisons', 0)}")
     if len(report.files) == 1:
         lines.append("- فقط یک فایل منبع تحلیل شد؛ تطبیق بین‌منبعی موضوعیت ندارد.")
+
+    if report.semantics:
+        lines.append("")
+        lines.append("### نقش‌های معنایی شناسایی‌شده")
+        lines.append(
+            _md_table(
+                ["فایل", "برگه", "بلوک", "ستون", "نقش", "نقش آماری", "واحد", "دوره"],
+                [
+                    [
+                        item["file"], item["sheet"], item["block"], item["header"],
+                        item["role_label"] or item["role"], item["statistical_role"] or "—",
+                        item["unit"] or "—", item["period"] or "—",
+                    ]
+                    for item in report.semantics[:40]
+                ],
+            )
+        )
+        if len(report.semantics) > 40:
+            lines.append(f"- {len(report.semantics) - 40} ردیف دیگر در JSON حسابرسی ثبت شده است.")
+
+    matched = list((report.matching or {}).get("matches", [])) + list(
+        (report.matching or {}).get("probable", [])
+    )
+    if matched:
+        lines.append("")
+        lines.append("### تطبیق ستون‌های معنایی بین منابع")
+        rows = []
+        for item in matched[:40]:
+            members = []
+            for member in item.get("members", []) or []:
+                members.append(
+                    f"{member.get('source', '')}/{member.get('sheet', '')}/"
+                    f"{member.get('block', '')}/«{member.get('header', '')}»"
+                )
+            rows.append(
+                [
+                    item.get("status_label", item.get("status", "")),
+                    item.get("normalized_label", ""),
+                    "؛ ".join(members),
+                    item.get("period_relation", "—"),
+                    "بله" if item.get("comparable") else "خیر",
+                    item.get("reason", "")[:120],
+                ]
+            )
+        lines.append(
+            _md_table(
+                ["وضعیت", "برچسب", "اعضا", "نسبت دوره", "قابل مقایسه", "دلیل"],
+                rows,
+            )
+        )
+
+    cross_source = list(report.cross_source_matches)
+    if cross_source:
+        lines.append("")
+        lines.append("### شاخص‌های ردیفی مشترک بین منابع")
+        lines.append(
+            _md_table(
+                ["شاخص", "نقش", "منابع", "دوره‌ها", "نشانی نمونه", "وضعیت", "دلیل"],
+                [
+                    [
+                        item["indicator"], "جمع" if item["role"] == "total" else "داده",
+                        "، ".join(item["sources"]),
+                        "؛ ".join(
+                            f"{source}: {'، '.join(periods)}"
+                            for source, periods in item["periods"].items()
+                        ),
+                        "؛ ".join(
+                            f"{source}: {values[0].get('address', '')}"
+                            for source, values in item["values"].items()
+                            if values
+                        ),
+                        item["status"],
+                        item["reason"],
+                    ]
+                    for item in cross_source[:40]
+                ],
+            )
+        )
+        if len(cross_source) > 40:
+            lines.append(f"- {len(cross_source) - 40} شاخص مشترک دیگر در JSON ثبت شده است.")
+    if report.comparisons:
+        lines.append("")
+        lines.append("### مقایسه شاخص‌ها در دو دوره")
+        lines.append(
+            _md_table(
+                ["شاخص", "دوره قبل", "دوره جاری", "تغییر", "درصد", "وضعیت", "منبع"],
+                [
+                    [
+                        item["indicator"],
+                        f"{item['previous_period']}: {item['previous'] or '—'}",
+                        f"{item['current_period']}: {item['current'] or '—'}",
+                        item["difference"] or "—",
+                        item["percent"] or "—",
+                        item["status_label"],
+                        f"{item.get('source', '')}/{item['sheet']}!"
+                        f"{item['previous_address']} ← {item['current_address']}",
+                    ]
+                    for item in report.comparisons[:40]
+                ],
+            )
+        )
+        if len(report.comparisons) > 40:
+            lines.append(f"- {len(report.comparisons) - 40} مقایسه دیگر در JSON حسابرسی ثبت شده است.")
     lines.append("")
 
     lines.append("## ۸. تطبیق‌های مبهم")
@@ -1310,11 +1689,29 @@ def render_markdown(report: AcceptanceReport) -> str:
         f"{dup_counts.get('blocked', 0)} | تصمیم نیازمند بررسی: {dup_counts.get('review', 0)} | "
         f"موارد خارج‌شده: {dup_counts.get('exclusions', 0)}"
     )
-    decisions = [
-        item for item in (report.duplicates or {}).get("decisions", [])
-        if str(item.get("status", "")).lower() != "allowed"
-    ]
+    groups = (report.duplicates or {}).get("groups", [])
+    if groups:
+        lines.append("")
+        lines.append("### گروه‌های داده تکراری / هم‌پوشان")
+        lines.append(
+            _md_table(
+                ["شناسه", "نوع", "یکسان", "شباهت", "اعضا", "دلیل"],
+                [
+                    [
+                        item.get("group_id", ""), item.get("kind", ""),
+                        "بله" if item.get("identical") else "خیر",
+                        item.get("similarity", ""),
+                        "؛ ".join(item.get("member_labels", []) or []) or "—",
+                        item.get("reason", ""),
+                    ]
+                    for item in groups[:30]
+                ],
+            )
+        )
+    decisions = list((report.duplicates or {}).get("decisions", []))
     if decisions:
+        lines.append("")
+        lines.append("### تصمیم‌های تجمیع بین منابع")
         lines.append(
             _md_table(
                 ["نوع", "وضعیت", "ستون‌ها", "منابع", "دلیل"],
@@ -1323,10 +1720,68 @@ def render_markdown(report: AcceptanceReport) -> str:
                         item["kind"], item["status"], "، ".join(item["headers"]) or "—",
                         "، ".join(item["sources"]) or "—", item["reason"],
                     ]
-                    for item in decisions[:30]
+                    for item in decisions[:40]
                 ],
             )
         )
+    exclusions = (report.duplicates or {}).get("exclusions", [])
+    if exclusions:
+        lines.append("")
+        lines.append("### موارد خارج‌شده از تجمیع")
+        lines.append(
+            _md_table(
+                ["فایل", "برگه", "بلوک", "نوع", "نشانی", "دلیل"],
+                [
+                    [
+                        item.get("source", ""), item.get("sheet", ""), item.get("block", ""),
+                        item.get("kind", ""), item.get("address", ""), item.get("reason", ""),
+                    ]
+                    for item in exclusions[:40]
+                ],
+            )
+        )
+    record_duplicates = (report.duplicates or {}).get("record_duplicates", [])
+    if record_duplicates:
+        lines.append("")
+        lines.append(f"- تکرار در سطح رکورد: {len(record_duplicates)} مورد (حذف نشده، فقط ثبت شده است).")
+
+    accidents = report.accidents or {}
+    if accidents.get("tables"):
+        lines.append("")
+        lines.append("### تفکیک داده‌های تصادف و تلفات")
+        lines.append(
+            f"- جدول تصادف: {accidents.get('tables', 0)} | "
+            f"شاخص‌های شناسایی‌شده: {len(accidents.get('metrics', []))}"
+        )
+        if accidents.get("missing"):
+            lines.append(
+                "- آمار موجود نیست و حدس زده نشد: " + "، ".join(accidents.get("missing", []))
+            )
+        metrics = list(accidents.get("metrics", []))
+        if metrics:
+            lines.append(
+                _md_table(
+                    ["برگه", "شاخص", "نوع", "نشانی"],
+                    [
+                        [
+                            item.get("sheet", ""), item.get("label", ""),
+                            item.get("kind_label", item.get("kind", "")), item.get("address", ""),
+                        ]
+                        for item in metrics[:30]
+                    ],
+                )
+            )
+        findings = accidents.get("findings", [])
+        if findings:
+            lines.append(
+                _md_table(
+                    ["کد", "وضعیت", "پیام"],
+                    [
+                        [item.get("code", ""), item.get("status", ""), item.get("message", "")]
+                        for item in findings[:30]
+                    ],
+                )
+            )
     lines.append("")
 
     lines.append("## ۱۰. نتایج تطبیق آماری")
@@ -1335,11 +1790,8 @@ def render_markdown(report: AcceptanceReport) -> str:
         f"- نتایج ثبت‌شده: {len(reconciliation.get('results', []))} | رد: "
         f"{reconciliation.get('failed', 0)} | هشدار: {reconciliation.get('warnings', 0)}"
     )
-    non_pass = [
-        item for item in reconciliation.get("results", [])
-        if str(item.get("status", "")).upper() != "PASS"
-    ]
-    if non_pass:
+    results = list(reconciliation.get("results", []))
+    if results:
         lines.append(
             _md_table(
                 ["فایل", "نوع", "شاخص", "انتظار", "محاسبه", "اختلاف", "وضعیت"],
@@ -1348,10 +1800,14 @@ def render_markdown(report: AcceptanceReport) -> str:
                         item["file"], item["kind"], item["label"], item["expected"],
                         item["calculated"], item["difference"], item["status"],
                     ]
-                    for item in non_pass[:30]
+                    for item in results[:40]
                 ],
             )
         )
+        if len(results) > 40:
+            lines.append(f"- {len(results) - 40} نتیجه دیگر در JSON حسابرسی ثبت شده است.")
+    else:
+        lines.append("- هیچ رابطه عددی قابل تطبیقی ثبت نشد.")
     lines.append("")
 
     lines.append("## ۱۱. بررسی‌های ناموفق و هشدارها")
@@ -1383,6 +1839,28 @@ def render_markdown(report: AcceptanceReport) -> str:
     missing = provenance.get("missing_fields") or {}
     if missing:
         lines.append(f"- فیلدهای ناقص: {missing}")
+    samples = provenance.get("samples") or []
+    if samples:
+        lines.append(
+            _md_table(
+                ["شاخص", "فایل", "برگه", "سلول", "دوره", "مقدار", "عملیات", "منبع"],
+                [
+                    [
+                        item.get("label", ""), item.get("filename", ""),
+                        item.get("sheet", ""), item.get("cell", ""),
+                        item.get("period", "") or "—", item.get("value", "") or "—",
+                        ("مشتق" if item.get("derived") else "منبع") +
+                        (f" / {item.get('operation')}" if item.get("operation") else ""),
+                        "؛ ".join(item.get("sources", []) or []) or "—",
+                    ]
+                    for item in samples
+                ],
+            )
+        )
+        if int(counts.get("important", 0) or 0) > len(samples):
+            lines.append(
+                f"- {int(counts.get('important', 0)) - len(samples)} رکورد دیگر در JSON حسابرسی ثبت شده است."
+            )
     lines.append("")
 
     lines.append("## ۱۳. فایل‌های خروجی تولیدشده")
@@ -1392,6 +1870,15 @@ def render_markdown(report: AcceptanceReport) -> str:
         f"- قالب: {outputs.get('format', '—')} | نویسنده: {outputs.get('writer', '—')} | "
         f"حالت: {outputs.get('mode', '—')} | جدول‌ها: {outputs.get('tables', 0)}"
     )
+    artifacts = report.artifacts or {}
+    if artifacts.get("json"):
+        lines.append(f"- گزارش حسابرسی JSON: {artifacts.get('json')}")
+    if artifacts.get("markdown"):
+        lines.append(f"- گزارش حسابرسی Markdown: {artifacts.get('markdown')}")
+    if outputs.get("template"):
+        lines.append(f"- قالب Word مرجع (فقط چیدمان): {outputs.get('template')}")
+    for note in outputs.get("notes", []) or []:
+        lines.append(f"- یادداشت قالب: {note}")
     lines.append("")
 
     lines.append("## ۱۴. اعتبارسنجی DOCX")

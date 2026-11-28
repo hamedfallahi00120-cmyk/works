@@ -149,6 +149,7 @@ class ReportGenerator:
             placeholders_resolved=result.placeholders_resolved,
             unresolved_placeholders=result.unresolved_placeholders,
             warnings=list(result.warnings),
+            notes=list(result.notes),
             content_validated=True,
             evidence=specification.evidence,
             mode=result.mode,

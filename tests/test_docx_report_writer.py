@@ -456,7 +456,7 @@ def test_matching_template_table_is_filled_instead_of_duplicated(
     assert "مقدار قدیمی" not in _all_text(document)
     assert any(cell.text == "فایل منبع" for cell in matching[0].columns[0].cells)
     assert result.tables_written == len(content.tables)
-    assert any("جلوگیری از تکرار" in warning for warning in result.warnings)
+    assert any("جلوگیری از تکرار" in note for note in result.notes)
 
 
 # --------------------------------------------------------------------------- #

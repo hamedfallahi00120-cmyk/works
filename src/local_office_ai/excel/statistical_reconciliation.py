@@ -650,6 +650,22 @@ def assess_aggregation(
                 f"دسته «{category}» در بیش از یک جزء آمده است؛ این طبقه‌بندی هم‌پوشان است."
             )
 
+    overlap_words = {"سایر", "متفرقه", "other", "others"}
+    word_owners: dict[str, set[str]] = {}
+    for component in components:
+        tokens = set(
+            normalize_text(normalize_digits(component.label or "")).lower().split()
+        )
+        for word in tokens & overlap_words:
+            word_owners.setdefault(word, set()).add(component.label)
+    for word, labels in sorted(word_owners.items()):
+        if len(labels) > 1:
+            overlap.append(word)
+            reasons.append(
+                f"برچسب‌های «{'»، «'.join(sorted(labels))}» هر دو دسته «{word}» هستند؛ "
+                "هم‌پوشانی آن‌ها اثبات نشده و جمع مجاز نیست."
+            )
+
     if distinct_labels:
         duplicates = sorted(label for label, count in label_counts.items() if count > 1 and label)
         if duplicates:
