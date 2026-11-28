@@ -42,9 +42,11 @@ as PR #6 (`d173465`). Prompt 02B was merged to `main` as PR #7 (`891b662`). Prom
 is implemented on `feature/prompt-03a-semantic-source-matching`; the branch is pushed to
 origin and PR #8 is open, but it is not merged to `main`. Prompt 03B was merged to
 `main` as PR #9 (`18fb3d4`), Prompt 04A was merged as PR #10 (`4741a98`), and
-Prompt 04B was merged as PR #11 (`8f77c25`). **Prompt 05A is implemented on
-`feature/prompt-05a-quality-gate-provenance`; PR #12 is open and it is not merged to
-`main` yet.**
+Prompt 04B was merged as PR #11 (`8f77c25`). Prompt 05A was merged as PR #12
+(`96f1e1a`). **Prompt 05B is implemented on the local branch
+`feature/prompt-05b-end-to-end-acceptance` (from `96f1e1a`); it is committed locally and
+not pushed or merged.** The real acceptance files were not available in this sandbox, so
+no real-file acceptance is claimed; see `docs/PROMPT_05B_ACCEPTANCE.md`.
 See the sections below.
 
 ### Prompt 01A extraction model
@@ -453,9 +455,10 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
   heading is not written twice: generated content is added under it, while a matching
   template table is filled by replacing its data rows. The match is exact on normalized
   header cells, so a template table with different headers receives a new table instead;
-  a table whose header row had merged cells may not be reused. Folder and multi-source
-  reports remain XLSX-only. PDF is recognised but not generated. The Windows rendering
-  itself cannot be verified on Linux; tests assert the OOXML properties Word reads.
+  a table whose header row had merged cells may not be reused. Prompt 05B adds folder
+  and multi-source DOCX delivery through `reporting/multi_source.py` and the same
+  writer. PDF is recognised but not generated. The Windows rendering itself cannot be
+  verified on Linux; tests assert the OOXML properties Word reads.
 
 ### Prompt 05A quality gate and data provenance
 
@@ -508,8 +511,63 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
 - Known limits: a reconciliation that produced no numeric value is reported by the
   reconciliation engine, not the provenance ledger; a formula-only total with no cached
   value is `WARNING` (unverifiable), not a mismatch. A report with no data table is a
-  warning/non-blocking failure, not a valid data analysis. Folder reports remain
-  XLSX-only and their gate is attached after the folder workbook is written.
+  warning/non-blocking failure, not a valid data analysis. Prompt 05B extends the folder
+  gate to DOCX output and attaches stages 12–13 to the generated Word file.
+
+### Prompt 05B end-to-end acceptance and false-success prevention
+
+- `excel/indicator_periods.py` — indicators in rows with one measure column per period
+  (`شاخص | 1404 | 1405`) are compared per indicator. Values stay `Decimal`; absolute
+  change and percent change are computed only when both periods exist and the baseline is
+  non-zero; a missing side yields `WARNING`, never zero. Declared total rows are kept as
+  `role="total"` comparisons and are never added to components. A month sheet whose
+  columns repeat one metric base (`تعداد کل | 1403 | 1404`) is not treated as row
+  indicators; that shape stays a monthly series.
+- `excel/accident_semantics.py` — separates `accident_count`, `fatal_accident_count`,
+  `fatality_count`, `injury_accident_count`, `injury_count` and `damage`; verifies
+  declared totals only against independent components; reports missing casualty
+  statistics by name instead of equating fatal accidents with fatalities.
+- `reporting/multi_source.py` — validated Persian report content for folder and
+  multi-source runs: source status, cross-period indicator comparisons with cell
+  addresses, semantic matching, duplicate/aggregation decisions, exclusions, statistical
+  reconciliation, accident/fatality breakdown, quality gate, provenance, warnings,
+  conclusions, recommendations and source/statistical notes. Only validated values enter;
+  the Word template is never a data source.
+- `app/folder_workflow.py` — folder runs resolve `xlsx`/`docx` once, reject a Word
+  template with a non-Word format, and route DOCX to `DocxReportWriter` after the
+  analysis, gate and content are ready. PDF is still rejected. The folder gate now
+  evaluates the generated Word file (stages 12–13) and records indicator provenance.
+- `quality/provenance.py` — `add_indicator_provenance` links each cross-period comparison
+  to its two source cells; a missing side keeps the present cell and is `WARNING`; both
+  missing produces no record. Comparison provenance records the present value, so it is
+  never an empty required field.
+- `quality/acceptance.py` — `AcceptanceRunner` performs the declared-input run, builds
+  the DOCX, reopens/validates it, checks grounded numbers, provenance and the quality
+  gate, verifies optional historical checkpoints against independently extracted values,
+  and writes a fifteen-section JSON/Markdown audit. Final status is `accepted`,
+  `partial`, `failed` or `unverified`; a skipped input, unreadable file, ignored block,
+  unidentified period, critical `FAIL`, wrong format, invalid DOCX or unverified numeric
+  claim can never be reported as accepted.
+- `ui/cli.py` — `--acceptance`, repeatable `--acceptance-input`, `--checkpoints` and
+  `--acceptance-dir`; exit codes 0 accepted, 3 partial, 4 failed, 5 unverified.
+  `--folder` now accepts `--format docx` and an optional template.
+- `excel/structure_intelligence.py` / `excel/period_integration.py` — a row-oriented
+  period table is kept out of the monthly metric grid so no metric named `1404/1405` is
+  invented and no false incomplete-month warning is raised.
+- `excel/sheet_analyzer.py` — a label plus at least two plausible reporting-year columns
+  is a valid header; a totals row (`جمع | 1404 | 1500`) is not promoted to a header.
+- `tests/test_end_to_end_acceptance.py` (15 tests) uses real openpyxl workbooks and real
+  DOCX packages: period header detection, totals-row rejection, per-indicator comparison,
+  zero baseline, accident/casualty separation, missing casualty statistics, valid
+  multi-source DOCX, template-mode folder DOCX, PDF rejection, accepted acceptance, CLI
+  exit code, unverified missing input, checkpoint mismatch without forcing the report,
+  conflicting-period failure and audit files for a partial run.
+- Known limits and honest status: the two named workbooks and the old Word document are
+  not in this repository. The sandbox run uses synthetic workbooks only to exercise the
+  pipeline and the checkpoint mechanism; it is **not** independent verification of the
+  owner's files. The owner must run the exact acceptance command on the Windows target.
+  See `docs/PROMPT_05B_ACCEPTANCE.md` for the command, the 15-section audit and the list
+  of unverified stages.
 
 ### Instructions for the next AI agent
 
@@ -528,10 +586,11 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
    (**Semantic Source Matching and Period Alignment**), Prompt 03B
    (**Duplicate Detection, Derived Sheets, and Safe Aggregation**), Prompt 04A
    (**Output Format Routing and Word Template Architecture**), Prompt 04B
-   (**DOCX Report Writer and Persian RTL Rendering**) and Prompt 05A
-   (**Quality Gate Architecture and Data Provenance**) are implemented. Do not repeat
-   them or substitute audit Phase 1a for them. The next engineering action starts only
-   after the owner accepts the latest prompt.
+   (**DOCX Report Writer and Persian RTL Rendering**), Prompt 05A
+   (**Quality Gate Architecture and Data Provenance**) and Prompt 05B
+   (**End-to-End Acceptance Testing and False-Success Prevention**) are implemented.
+   Do not repeat them or substitute audit Phase 1a for them. The next engineering action
+   starts only after the owner accepts the latest prompt.
 6. Follow the supplied shared execution contract: one dedicated branch per stage,
    focused tests, actual evidence, no merge/push to `main`, no rewrite of project
    architecture, Python as the numeric source of truth, and Qwen for narrative only.
@@ -556,16 +615,20 @@ from the CI gate with `-m "not requires_sample"`; they are not counted as succes
   `statistical_reconciliation.py` validates declared totals, groups and periods without
   summing unrelated rows, and exposes explicit hierarchy/category comparison APIs for
   structures that cannot be inferred from a flat table.
+  `indicator_periods.py` compares row-oriented indicators across period columns;
+  `accident_semantics.py` separates accident counts from casualties.
   `statistical_analysis.py` is the general engine; `generic_report.py` holds the generic
   report sheets as a mixin. `validation.py` holds the 9-check quality checklist.
 - `src/local_office_ai/ai/` — Ollama client, context builder, prompts, response validator,
   analyzer (model + deterministic fallback), ComfyUI image studio.
 - `src/local_office_ai/quality/` — the central gate and evidence layer:
   `models.py` (`PASS`/`WARNING`/`FAIL`, thirteen stages, gate report, provenance
-  records), `provenance.py` (ledger built from existing values and cells) and
-  `gate.py` (`QualityGate.evaluate` / `evaluate_folder`, reusing the existing analyzers).
+  records), `provenance.py` (ledger built from existing values and cells),
+  `gate.py` (`QualityGate.evaluate` / `evaluate_folder`, reusing the existing analyzers)
+  and `acceptance.py` (`AcceptanceRunner`, checkpoints, fifteen-section audit).
 - `src/local_office_ai/reporting/` — output-format decision layer and DOCX template
-  contract: `formats.py` (format resolution/validation), `specification.py`
+  contract: `formats.py` (format resolution/validation), `multi_source.py` (validated
+  folder/multi-source DOCX content), `specification.py`
   (`ReportSpecification`, validated `ReportContent`), `template.py` (DOCX inspection),
   `docx_writer.py` (template-mode placeholder rendering), `docx_report_writer.py`
   (standalone/template Word writer), `docx_rtl.py` (OOXML RTL primitives),
@@ -598,6 +661,9 @@ python -m pytest tests -o addopts="" -q -m "not requires_sample"   # CI gate: re
 python run_engine.py --file <xlsx> --no-ai --yes
 python run_engine.py --file <xlsx> --request "مقایسه 1404 با 1403 و بیشترین ماه" --no-ai
 python run_engine.py --folder data/input --request "جمع شاخص‌ها را مقایسه کن" --no-ai
+python run_engine.py --folder data/input --output report.docx --no-ai
+python run_engine.py --acceptance --acceptance-input a.xlsx --acceptance-input b.xlsx \
+  --acceptance-input old.docx --checkpoints checkpoints.json --output report.docx --no-ai
 python run_engine.py --file <xlsx> --audit --no-ai     # full traceability output
 python run_engine.py --check-structure --file <xlsx>
 python run_engine.py --inspect-template templates/report.docx   # DOCX structure/styles/placeholders
@@ -630,7 +696,8 @@ python run_engine.py --file <xlsx> --output report.docx --template templates/rep
 - Word output is template mode: `--template` is required and the output must end in
   `.docx`. A Word request never falls back to an Excel workbook.
 - PDF is recognised but generation is not implemented; it fails with a clear error.
-- Folder and multi-source reports remain XLSX-only. Their workflows reject DOCX/PDF.
+- Folder and multi-source reports support DOCX via `reporting/multi_source.py`; PDF is
+  still rejected, and a Word template requires Word output.
 - Template figures are presentation artifacts. Report numbers come only from
   `ReportContent.from_analysis` / `AnalysisResult`.
 
@@ -727,6 +794,16 @@ is such a file: 4 sheets labelled 1403/1404, 4 labelled 1404/1405, heaviest over
   read as days (`labels_are_days` in `structure_intelligence.py`).
 - A few mismatching declared totals (under 10% of audited totals) stay a warning, not a
   failed checklist, because Python figures remain authoritative.
+- Acceptance is a claim, not a label. `accepted` requires every stage `PASS`, the
+  requested format, a reopened/valid DOCX, grounded numbers, complete provenance and
+  matched checkpoints. A skipped file, ignored block, unidentified period, critical
+  failure, wrong format or unverified number is `partial`/`failed`; missing Excel inputs
+  are `unverified`. Never turn one of these into success.
+- A historical checkpoint is verification evidence only. Compare it with the independently
+  extracted value; on mismatch keep the extracted value and record the difference. Never
+  write a checkpoint into the report and never adjust the report to match it.
+- Accident counts, fatal accidents, fatalities, injury accidents and injured people are
+  different quantities. Missing casualty statistics must be named, not inferred.
 
 ## Desktop UI structure (RTL refinement pass)
 - `ui/desktop/theme.py` — `Palette` + `palette_for(theme)`, `build_stylesheet(...)`, `apply_palette`.

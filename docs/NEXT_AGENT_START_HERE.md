@@ -1,4 +1,4 @@
-# Next Agent Start Here — Prompt 05A
+# Next Agent Start Here — Prompt 05B
 
 ## Repository and starting point
 
@@ -10,8 +10,11 @@
 - Prompt 03A is implemented on `feature/prompt-03a-semantic-source-matching`; PR #8
   is open and not merged to `main`.
 - Prompt 04B was merged to `main` as PR #11 (`8f77c25`).
-- Prompt 05A is implemented on `feature/prompt-05a-quality-gate-provenance`, created
-  from `main` at `8f77c25`; PR #12 is open and not merged.
+- Prompt 05A was merged to `main` as PR #12 (`96f1e1a`).
+- Prompt 05B is implemented on `feature/prompt-05b-end-to-end-acceptance` (from
+  `96f1e1a`). It is committed locally; no push or merge is claimed. The real acceptance
+  files were unavailable, so real-file acceptance is unverified:
+  `docs/PROMPT_05B_ACCEPTANCE.md`.
 - The three original administrative source files and the private sample workbook are
   intentionally not stored in GitHub.
 
@@ -24,8 +27,8 @@ Prompt 01A — Data Model, Workbook Structure, and Metadata Extraction — is im
 and merged. Prompt 01B, Prompt 02A, Prompt 02B, Prompt 03B, Prompt 04A and Prompt 04B
 are merged. Prompt 03A remains on its branch and PR #8.
 
-**Prompt 05A — Quality Gate Architecture and Data Provenance — is implemented on
-`feature/prompt-05a-quality-gate-provenance`; PR #12 is open.** It adds:
+**Prompt 05A — Quality Gate Architecture and Data Provenance — was merged as PR #12.**
+It adds:
 
 - `quality/models.py` — one `PASS` / `WARNING` / `FAIL` model over the thirteen required
   stages, `GateFinding`, `GateStageResult`, `QualityGateReport`, and the machine-readable
@@ -51,22 +54,33 @@ are merged. Prompt 03A remains on its branch and PR #8.
 
 Recorded sandbox evidence (Linux, CPython 3.13.15, pytest 9.2.0):
 
+**Prompt 05B — End-to-End Acceptance Testing and False-Success Prevention — is
+implemented on `feature/prompt-05b-end-to-end-acceptance`.** It adds row-oriented
+indicator/period comparison, accident/casualty separation, folder DOCX delivery, the
+`AcceptanceRunner` with a fifteen-section audit, and explicit `partial`/`failed`/
+`unverified` outcomes. The real input files were absent from this sandbox; no real-file
+acceptance is claimed. See `docs/PROMPT_05B_ACCEPTANCE.md`.
+
 ```text
 python -m pytest tests/test_quality_gate.py -o addopts="" -q
 -> 9 passed in 2.06s
 
+python -m pytest tests/test_end_to_end_acceptance.py -o addopts="" -q
+-> 15 passed in 3.50s
+
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 358 passed, 2 skipped, 36 deselected in 51.24s
+-> 369 passed, 6 skipped, 36 deselected in 51.72s
 ```
 
 The 36 deselected tests are `requires_sample`; their private workbook is absent and they
-are not counted as passing. The 2 skips are optional GUI/monitoring tests whose system
+are not counted as passing. The 6 skips are optional GUI/monitoring tests whose system
 libraries are unavailable in this sandbox.
 
 ## Start procedure
 
 1. Fetch the private repository and switch to
-   `feature/prompt-05a-quality-gate-provenance`.
+   `feature/prompt-05b-end-to-end-acceptance` (or the branch containing the latest
+   accepted prompt, if the owner merged it).
 2. Verify the current branch, HEAD SHA and clean working tree. Record the exact output.
 3. Read, in this order:
    - `MASTER_PROJECT_HANDOVER_PUBLIC.txt`
@@ -76,12 +90,14 @@ libraries are unavailable in this sandbox.
    - this file
 4. Use the Phase-0 audit as the accepted baseline. Do not demand that the owner resend
    these files, repeat the audit, or perform another exploratory phase.
-5. Prompts 01A, 01B, 02A, 02B, 03A, 03B, 04A, 04B and 05A are implemented. Do not
-   repeat them. Wait for the owner to accept Prompt 05A before starting the next stage.
+5. Prompts 01A, 01B, 02A, 02B, 03A, 03B, 04A, 04B, 05A and 05B are implemented. Do not
+   repeat them. Wait for the owner to accept Prompt 05B before starting the next stage.
 6. Keep Python as the only arithmetic authority, Qwen for narrative only, and every
    report number traceable to validated `ReportContent`.
 7. Windows Word rendering and the real administrative files remain owner-side checks on
    `F:\Local-Office-AI`. Do not recreate that environment or fabricate those files.
+   Prompt 05B's real-file acceptance is **unverified** until the owner runs
+   `docs/PROMPT_05B_ACCEPTANCE.md` on the Windows target.
 
 ## Non-negotiable rules for the next stage
 

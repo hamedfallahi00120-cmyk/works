@@ -110,6 +110,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint", help="نام checkpoint در ComfyUI")
     parser.add_argument("--no-image-ai", action="store_true", help="بهبود پرامپت تصویر با مدل انجام نشود")
     parser.add_argument("--check-structure", action="store_true", help="فقط ساختار فایل را گزارش کن")
+    parser.add_argument(
+        "--acceptance",
+        action="store_true",
+        help="اجرای پذیرش سرتاسری چندمنبعی و تولید گزارش حسابرسی",
+    )
+    parser.add_argument(
+        "--acceptance-input",
+        dest="acceptance_inputs",
+        action="append",
+        help="فایل ورودی پذیرش (قابل تکرار)؛ Excel به‌عنوان داده و Word فقط به‌عنوان مرجع قالب",
+    )
+    parser.add_argument(
+        "--checkpoints",
+        help="فایل JSON مقادیر شاهد تاریخی (فقط برای تأیید، نه ورود به گزارش)",
+    )
+    parser.add_argument(
+        "--acceptance-dir",
+        help="پوشه نوشتن گزارش حسابرسی پذیرش (JSON و Markdown)",
+    )
     parser.add_argument("--yes", "-y", action="store_true", help="تأیید خودکار ساختار مشکوک")
     parser.add_argument("--gui", action="store_true", help="اجرای رابط گرافیکی")
     parser.add_argument("--root", help="ریشه پروژه (پیش‌فرض: محل همین بسته)")
@@ -134,6 +153,9 @@ def main(argv: list[str] | None = None) -> int:
         return _inspect_template(Path(args.inspect_template))
 
     profile = "audit" if args.audit else (settings.report_profile or "clean")
+
+    if args.acceptance:
+        return _run_acceptance(settings, args)
 
     if args.folder:
         return _run_folder(settings, args, profile)
@@ -281,12 +303,6 @@ def _inspect_template(path: Path) -> int:
 def _run_folder(settings, args, profile: str) -> int:
     from local_office_ai.app.folder_workflow import FolderWorkflow
 
-    if args.template:
-        print(
-            "خطا: گزارش پوشه فقط به صورت کارپوشه Excel تولید می‌شود و از قالب Word پشتیبانی نمی‌کند.",
-            file=sys.stderr,
-        )
-        return 2
     folder = Path(args.folder)
     if not folder.is_dir():
         print(f"خطا: پوشه پیدا نشد: {folder}", file=sys.stderr)
@@ -304,6 +320,8 @@ def _run_folder(settings, args, profile: str) -> int:
             output=args.output,
             output_format=args.output_format,
             profile=profile,
+            template=args.template,
+            keep_template_figures=args.keep_template_figures,
         )
     except ReportFormatError as exc:
         print(f"خطا: {exc}", file=sys.stderr)
@@ -318,9 +336,68 @@ def _run_folder(settings, args, profile: str) -> int:
             print(f"      خطا: {item.error}")
     if result.output_path:
         print(f"خروجی: {result.output_path}")
+    gate = getattr(result, "quality_gate", None)
+    if gate is not None:
+        print(f"دروازه کیفیت: {gate.status.label_fa} | وضعیت اجرا: {result.status}")
+        counts = {}
+        for stage in gate.stages:
+            counts[stage.status.value] = counts.get(stage.status.value, 0) + 1
+        print("  " + " | ".join(f"{key}: {value}" for key, value in counts.items()))
     for warning in result.warnings[:10]:
         print(f"هشدار: {warning}", file=sys.stderr)
     return 0
+
+
+def _run_acceptance(settings, args) -> int:
+    from local_office_ai.quality.acceptance import (
+        STATUS_ACCEPTED,
+        STATUS_FAILED,
+        STATUS_PARTIAL,
+        STATUS_UNVERIFIED,
+        AcceptanceRunner,
+        load_checkpoints,
+    )
+
+    inputs = [Path(item) for item in (args.acceptance_inputs or [])]
+    if not inputs:
+        print(
+            "خطا: برای پذیرش، دست‌کم یک --acceptance-input لازم است.",
+            file=sys.stderr,
+        )
+        return 2
+    checkpoints = load_checkpoints(args.checkpoints) if args.checkpoints else []
+    runner = AcceptanceRunner(
+        settings,
+        progress=(lambda message: None) if args.quiet else print,
+    )
+    report = runner.run(
+        inputs,
+        request=args.request or args.goal or args.question or "گزارش مدیریتی چندمنبعی",
+        output=args.output,
+        output_dir=args.acceptance_dir,
+        template=args.template,
+        checkpoints=checkpoints,
+        use_ai=not args.no_ai,
+    )
+    print("")
+    print(f"وضعیت پذیرش: {report.status_label}")
+    for check in report.checks:
+        print(f"  [{check.status}] {check.code}: {check.message}")
+    output_dir = Path(args.acceptance_dir) if args.acceptance_dir else settings.output_dir
+    json_path, markdown_path = report.write(output_dir)
+    print(f"گزارش حسابرسی JSON: {json_path}")
+    print(f"گزارش حسابرسی Markdown: {markdown_path}")
+    for error in report.errors:
+        print(f"خطا: {error}", file=sys.stderr)
+    if report.status == STATUS_ACCEPTED:
+        return 0
+    if report.status == STATUS_PARTIAL:
+        return 3
+    if report.status == STATUS_FAILED:
+        return 4
+    if report.status == STATUS_UNVERIFIED:
+        return 5
+    return 1
 
 
 def _list_models(settings) -> int:
