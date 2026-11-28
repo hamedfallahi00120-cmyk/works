@@ -180,10 +180,13 @@ class ResultsView(Card):
         self.path_label.setText(ltr(self._path))
         self.path_label.setToolTip(self._path)
         status = str(getattr(result, "status", ""))
-        self.status_badge.set_status(
-            "تکمیل شد" if status == "completed" else "با هشدار تکمیل شد",
-            "success" if status == "completed" else "warning",
-        )
+        if status == "completed":
+            status_label, status_tone = "تکمیل شد", "success"
+        elif status == "failed":
+            status_label, status_tone = "ناموفق — گزارش معتبر نیست", "danger"
+        else:
+            status_label, status_tone = "با هشدار تکمیل شد", "warning"
+        self.status_badge.set_status(status_label, status_tone)
         ai = getattr(analysis, "ai", {}) or {}
         self.mode_badge.set_status(
             f"{mode_label(ai.get('mode'))}" + (f" — {ltr(ai.get('model'))}" if ai.get("model") else ""),

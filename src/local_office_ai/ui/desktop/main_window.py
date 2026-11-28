@@ -743,6 +743,13 @@ class MainWindow(QMainWindow):
         status = getattr(result, "status", "completed")
         if status == "completed":
             self.banner.show_message("تحلیل کامل شد و گزارش Excel ساخته شد.", "success")
+        elif status == "failed":
+            self.banner.show_message(
+                "تحلیل ناموفق بود؛ دروازه کیفیت گزارش نهایی را معتبر نمی‌داند. "
+                "فایل خروجی را مبنای تصمیم قرار ندهید.",
+                "danger",
+                timeout_ms=12000,
+            )
         else:
             self.banner.show_message("تحلیل با هشدار کامل شد؛ بخش هشدار‌ها را ببینید.", "warning")
         self.reports_page.refresh()
@@ -761,6 +768,12 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self.folder_page.reveal(self.folder_page.results))
         if str(getattr(result, "status", "")) == "completed":
             self.banner.show_message("تحلیل منابع کامل شد.", "success")
+        elif str(getattr(result, "status", "")) == "failed":
+            self.banner.show_message(
+                "تحلیل منابع ناموفق بود؛ دروازه کیفیت گزارش پوشه را معتبر نمی‌داند.",
+                "danger",
+                timeout_ms=12000,
+            )
         else:
             self.banner.show_message("تحلیل منابع با هشدار کامل شد؛ جزئیات هر فایل را ببینید.", "warning")
         self.reports_page.refresh()

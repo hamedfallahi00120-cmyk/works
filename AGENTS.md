@@ -41,9 +41,11 @@ Prompt 01B was merged to `main` as PR #5 (`113cc1f`). Prompt 02A was merged to `
 as PR #6 (`d173465`). Prompt 02B was merged to `main` as PR #7 (`891b662`). Prompt 03A
 is implemented on `feature/prompt-03a-semantic-source-matching`; the branch is pushed to
 origin and PR #8 is open, but it is not merged to `main`. Prompt 03B was merged to
-`main` as PR #9 (`18fb3d4`), and Prompt 04A was merged as PR #10 (`4741a98`).
-**Prompt 04B is implemented on `feature/prompt-04b-docx-report-writer`; PR #11 is open
-and it is not merged to `main` yet.** See the sections below.
+`main` as PR #9 (`18fb3d4`), Prompt 04A was merged as PR #10 (`4741a98`), and
+Prompt 04B was merged as PR #11 (`8f77c25`). **Prompt 05A is implemented on
+`feature/prompt-05a-quality-gate-provenance`; PR #12 is open and it is not merged to
+`main` yet.**
+See the sections below.
 
 ### Prompt 01A extraction model
 
@@ -455,6 +457,60 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
   reports remain XLSX-only. PDF is recognised but not generated. The Windows rendering
   itself cannot be verified on Linux; tests assert the OOXML properties Word reads.
 
+### Prompt 05A quality gate and data provenance
+
+- `quality/models.py` — one `PASS` / `WARNING` / `FAIL` model for all thirteen stages:
+  source availability, file readability, extraction completeness, block detection,
+  period identification, semantic classification, data quality, statistical validity,
+  duplicate/overlap detection, cross-source reconciliation, provenance completeness,
+  output-format correctness and final document integrity. `GateFinding`,
+  `GateStageResult` and `QualityGateReport` carry status, checks, evidence, blocking
+  failures and the provenance ledger. A warning never sets
+  `QualityGateReport.is_complete_success`; a blocking `FAIL` sets `blocked=True` and
+  `can_claim_valid_report=False`.
+- `quality/provenance.py` — `ProvenanceLedger` / `ProvenanceRecord` /
+  `ProvenanceSource` built from values Python already calculated. A record keeps the
+  source filename, sheet, block, cell or range, original and normalized labels, original
+  and normalized values, period, unit, operation, formula/transformation, source cells
+  with their raw values and formulas, related records and validation status. Declared
+  totals are source records; calculations, generic statistics, period totals, request
+  answers, reconciliations, comparisons and averages are derived records. A derived
+  record must point to at least one source cell/range; a missing required field or a
+  derived value without a source is a blocking provenance failure. Loan defaults are not
+  treated as figures of a non-loan workbook.
+- `quality/gate.py` — `QualityGate.evaluate` reuses the existing `DataQualityAnalyzer`,
+  `StatisticalReconciliation`, `DuplicateControlAnalyzer`, extraction model, semantics,
+  period evidence and `ProvenanceLedger`; it does not create a second validator.
+  `QualityGate.evaluate_folder` applies the same thirteen stages to multi-file reports,
+  merges per-file ledgers and refuses unsafe cross-file totals. Stages 1–11 are evaluated
+  before the writer reads the analysis; stages 12–13 after generation.
+- `core/models.py` — `AnalysisResult.provenance`, `AnalysisResult.quality_gate`,
+  `RunResult.quality_gate`; all serialize into the processed JSON. `FolderResult` carries
+  the folder gate. `RunResult.status` is `failed` for a blocking gate failure, `completed`
+  only for a clean `PASS` with unchanged input, and `completed_with_warnings` for a
+  warning or non-blocking failure. Do not present a warning as complete success.
+- `app/workflow.py`, `app/folder_workflow.py`, `app/coordinator.py` — attach the gate,
+  record blocking failures in `errors`, and print the gate status, stage counts and the
+  valid-report/complete-success claim in the console summary. The desktop result page,
+  folder result page, banner and composer hint render a blocked/failed run as
+  «ناموفق — گزارش معتبر نیست», never as an ordinary warning or completed report.
+- `excel/report_writer.py`, `reporting/specification.py` — the audit profile writes
+  «دروازه کیفیت» and «ردیابی منبع (شواهد)»; the clean profile never writes them and
+  shows only a compact gate summary in «اعتبارسنجی داده». `ReportContent` carries the
+  gate and provenance summary for the Word writer. A template never becomes a data
+  source.
+- `tests/test_quality_gate.py` (9 tests) covers complete provenance, missing cell
+  references, derived values with source references, failed extraction, statistical
+  validation failure, warning propagation, blocking critical failures, status
+  consistency and merged folder/cross-source evidence. `tests/test_workflow_generic.py`
+  and `tests/test_output_quality.py` now expect `completed_with_warnings` where a
+  no-table/vague file or an unsafe cross-file total is not complete success.
+- Known limits: a reconciliation that produced no numeric value is reported by the
+  reconciliation engine, not the provenance ledger; a formula-only total with no cached
+  value is `WARNING` (unverifiable), not a mismatch. A report with no data table is a
+  warning/non-blocking failure, not a valid data analysis. Folder reports remain
+  XLSX-only and their gate is attached after the folder workbook is written.
+
 ### Instructions for the next AI agent
 
 1. Fetch the repository and start from the branch that contains the latest accepted
@@ -471,8 +527,9 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
    (**Statistical Reconciliation and Calculation Integrity**), Prompt 03A
    (**Semantic Source Matching and Period Alignment**), Prompt 03B
    (**Duplicate Detection, Derived Sheets, and Safe Aggregation**), Prompt 04A
-   (**Output Format Routing and Word Template Architecture**) and Prompt 04B
-   (**DOCX Report Writer and Persian RTL Rendering**) are implemented. Do not repeat
+   (**Output Format Routing and Word Template Architecture**), Prompt 04B
+   (**DOCX Report Writer and Persian RTL Rendering**) and Prompt 05A
+   (**Quality Gate Architecture and Data Provenance**) are implemented. Do not repeat
    them or substitute audit Phase 1a for them. The next engineering action starts only
    after the owner accepts the latest prompt.
 6. Follow the supplied shared execution contract: one dedicated branch per stage,
@@ -503,10 +560,16 @@ from the CI gate with `-m "not requires_sample"`; they are not counted as succes
   report sheets as a mixin. `validation.py` holds the 9-check quality checklist.
 - `src/local_office_ai/ai/` — Ollama client, context builder, prompts, response validator,
   analyzer (model + deterministic fallback), ComfyUI image studio.
+- `src/local_office_ai/quality/` — the central gate and evidence layer:
+  `models.py` (`PASS`/`WARNING`/`FAIL`, thirteen stages, gate report, provenance
+  records), `provenance.py` (ledger built from existing values and cells) and
+  `gate.py` (`QualityGate.evaluate` / `evaluate_folder`, reusing the existing analyzers).
 - `src/local_office_ai/reporting/` — output-format decision layer and DOCX template
   contract: `formats.py` (format resolution/validation), `specification.py`
   (`ReportSpecification`, validated `ReportContent`), `template.py` (DOCX inspection),
-  `docx_writer.py` (template-mode placeholder rendering) and `generator.py` (writer
+  `docx_writer.py` (template-mode placeholder rendering), `docx_report_writer.py`
+  (standalone/template Word writer), `docx_rtl.py` (OOXML RTL primitives),
+  `docx_validation.py` (reopen/validate a delivered DOCX) and `generator.py` (writer
   routing).
 - `src/local_office_ai/monitoring/` — psutil sampler + Windows GPU counters (`typeperf`).
 - `src/local_office_ai/app/` — workflow stages and coordinator.

@@ -191,7 +191,9 @@ def test_folder_mode_compares_files_without_touching_them(tmp_path, folder_setti
         tmp_path, request="جمع شاخص‌های هر فایل را مقایسه کن", use_ai=False
     )
 
-    assert result.status == "completed"
+    assert result.status == "completed_with_warnings"
+    assert result.quality_gate is not None
+    assert result.quality_gate.is_complete_success is False
     assert {item.name for item in result.files} == {"الف.xlsx", "ب.xlsx"}
     assert METRIC in result.metrics
     workbook = openpyxl.load_workbook(result.output_path)

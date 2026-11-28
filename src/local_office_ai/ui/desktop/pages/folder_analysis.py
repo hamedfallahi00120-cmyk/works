@@ -408,7 +408,16 @@ class FolderAnalysisPage(Page):
         self.progress_card.finish()
         self.progress_card.setVisible(False)
         self.show_result(result)
-        self.composer.set_hint("تحلیل پوشه کامل شد.", "success")
+        status = str(getattr(result, "status", ""))
+        if status == "failed":
+            self.composer.set_hint(
+                "تحلیل پوشه انجام شد اما دروازه کیفیت گزارش را معتبر نمی‌داند.",
+                "danger",
+            )
+        elif status == "completed":
+            self.composer.set_hint("تحلیل پوشه کامل شد.", "success")
+        else:
+            self.composer.set_hint("تحلیل پوشه با هشدار کامل شد؛ جزئیات را بررسی کنید.", "warning")
 
     def finish_error(self, message: str) -> None:
         self.composer.set_running(False)

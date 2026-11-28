@@ -286,6 +286,8 @@ class ReportContent:
     recommendations: list[str] = field(default_factory=list)
     source_notes: list[str] = field(default_factory=list)
     statistical_notes: list[str] = field(default_factory=list)
+    quality_gate: dict[str, Any] | None = None
+    provenance_summary: dict[str, Any] | None = None
 
     @classmethod
     def from_analysis(
@@ -775,6 +777,25 @@ class ReportContent:
         if generic is not None and getattr(generic, "correlations", None):
             statistical_notes.append("همبستگی رابطه علّی نیست و فقط شدت همراهی را نشان می‌دهد.")
 
+        gate = getattr(analysis, "quality_gate", None)
+        provenance = getattr(analysis, "provenance", None)
+        quality_gate_payload = (
+            gate.to_dict() if hasattr(gate, "to_dict") else gate
+        )
+        provenance_payload = (
+            provenance.to_dict() if hasattr(provenance, "to_dict") else provenance
+        )
+        if gate is not None and getattr(gate, "finalized", False):
+            gate_status = _status_value(getattr(gate, "status", ""))
+            if gate_status == "FAIL":
+                warnings.append(
+                    "دروازه کیفیت شکست ثبت کرده است؛ این گزارش سند معتبر نهایی تلقی نمی‌شود."
+                )
+            elif gate_status == "WARNING":
+                warnings.append(
+                    "دروازه کیفیت هشدار دارد؛ گزارش موفقیت کامل نیست و باید با قید بازبینی استفاده شود."
+                )
+
         return cls(
             title=report_title,
             subtitle=subtitle,
@@ -790,6 +811,8 @@ class ReportContent:
             recommendations=recommendations,
             source_notes=source_notes,
             statistical_notes=statistical_notes,
+            quality_gate=quality_gate_payload,
+            provenance_summary=provenance_payload,
         )
 
     # ------------------------------------------------------------------ #
@@ -886,6 +909,10 @@ class ReportContent:
             "statistical_notes": list(self.statistical_notes),
             "values": {key: item.to_dict() for key, item in self.values.items()},
             "warnings": list(self.warnings),
+            "quality_gate": dict(self.quality_gate) if self.quality_gate else None,
+            "provenance_summary": (
+                dict(self.provenance_summary) if self.provenance_summary else None
+            ),
         }
 
 

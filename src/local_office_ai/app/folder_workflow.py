@@ -33,6 +33,7 @@ from local_office_ai.excel.duplicate_control import (
 from local_office_ai.excel.period_integration import PeriodIntegration
 from local_office_ai.excel.report_writer import ExcelReportWriter
 from local_office_ai.excel.semantic_matching import match_across_sources
+from local_office_ai.quality import GateStatus, QualityGate
 from local_office_ai.reporting.formats import (
     OutputFormat,
     ensure_extension_matches,
@@ -99,6 +100,7 @@ class FolderResult:
     period: str = ""
     matching: Any = None
     duplicate_control: Any = None
+    quality_gate: Any = None
     warnings: list[str] = field(default_factory=list)
     status: str = "completed"
 
@@ -118,6 +120,11 @@ class FolderResult:
                 self.duplicate_control.to_dict()
                 if hasattr(self.duplicate_control, "to_dict")
                 else self.duplicate_control
+            ),
+            "quality_gate": (
+                self.quality_gate.to_dict()
+                if hasattr(self.quality_gate, "to_dict")
+                else self.quality_gate
             ),
             "files": [item.to_dict() for item in self.files],
             "warnings": list(self.warnings),
@@ -236,7 +243,23 @@ class FolderWorkflow:
         )
         writer = FolderReportWriter(self.settings)
         result.output_path = str(writer.build_folder(result, merged, output_path))
-        result.status = "completed" if all(item.status == "تحلیل شد" for item in result.files) else "completed_with_warnings"
+        quality_gate = QualityGate().evaluate_folder(result)
+        if quality_gate.blocked:
+            result.status = "failed"
+            result.warnings.append(
+                "دروازه کیفیت: گزارش پوشه معتبر نیست؛ مراحل مسدودکننده: "
+                + "، ".join(item.stage.label_fa for item in quality_gate.blocking_failures)
+            )
+        elif quality_gate.status is GateStatus.PASS and all(
+            item.status == "تحلیل شد" for item in result.files
+        ):
+            result.status = "completed"
+        else:
+            result.status = "completed_with_warnings"
+            if quality_gate.status is GateStatus.WARNING:
+                result.warnings.append(
+                    "دروازه کیفیت پوشه هشدار دارد؛ موفقیت کامل گزارش نمی‌شود."
+                )
         return result
 
     # ------------------------------------------------------------------ #

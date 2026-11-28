@@ -188,6 +188,12 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
         "duplicate_control": lambda self, wb, context: self._duplicate_control_sheet(
             wb, context.analysis
         ),
+        "quality_gate": lambda self, wb, context: self._quality_gate_sheet(
+            wb, context.analysis
+        ),
+        "provenance": lambda self, wb, context: self._provenance_sheet(
+            wb, context.analysis
+        ),
     }
 
     def _plan(self, context: ReportContext, profile: str) -> list[str]:
@@ -248,6 +254,10 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
             audit_tail.append("semantic_matching")
         if getattr(analysis, "duplicate_control", None) is not None:
             audit_tail.append("duplicate_control")
+        if getattr(analysis, "quality_gate", None) is not None:
+            audit_tail.append("quality_gate")
+        if getattr(analysis, "provenance", None) is not None:
+            audit_tail.append("provenance")
         audit_tail.extend(
             [
                 "normalized",
@@ -957,6 +967,59 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
             ws.cell(5, 1, "اعتبارسنجی برای این تحلیل اجرا نشد.")
         else:
             self._body(ws, 5, row - 1, 1, 5)
+
+        gate = getattr(analysis, "quality_gate", None)
+        if gate is not None:
+            from local_office_ai.quality import GATE_STATUS_FA, GateStatus
+
+            row += 1
+            self._section(ws, row, "دروازه کیفیت یکپارچه (ارزیابی پیش از تولید سند نهایی)", 5)
+            row += 1
+            self._value_cell(ws, row, 1, "وضعیت کلی دروازه کیفیت")
+            self._value_cell(ws, row, 2, GATE_STATUS_FA.get(gate.status, gate.status.value))
+            self._fill(
+                ws.cell(row, 2),
+                {
+                    GateStatus.PASS: GREEN,
+                    GateStatus.WARNING: YELLOW,
+                    GateStatus.FAIL: RED,
+                }.get(gate.status, GREY),
+            )
+            counts = gate.counts()
+            self._value_cell(
+                ws,
+                row,
+                3,
+                (
+                    f"PASS {counts.get('PASS', 0)} / WARNING {counts.get('WARNING', 0)} / "
+                    f"FAIL {counts.get('FAIL', 0)} / مسدودکننده {counts.get('blocking', 0)}"
+                ),
+            )
+            ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=5)
+            row += 1
+            wrote_gate = False
+            for stage in gate.stages:
+                if stage.status is GateStatus.PASS:
+                    continue
+                wrote_gate = True
+                self._value_cell(ws, row, 1, stage.label_fa)
+                self._value_cell(ws, row, 2, stage.summary)
+                self._value_cell(ws, row, 3, GATE_STATUS_FA.get(stage.status, stage.status.value))
+                self._value_cell(ws, row, 4, "بله" if stage.blocking else "خیر")
+                issues = [check.message for check in stage.checks if check.status is not GateStatus.PASS]
+                self._value_cell(ws, row, 5, "؛ ".join(issues[:4]) or "—")
+                self._fill(
+                    ws.cell(row, 3),
+                    {
+                        GateStatus.PASS: GREEN,
+                        GateStatus.WARNING: YELLOW,
+                        GateStatus.FAIL: RED,
+                    }.get(stage.status, GREY),
+                )
+                row += 1
+            if not wrote_gate:
+                self._value_cell(ws, row, 1, "همه مراحل ارزیابی‌شده PASS هستند.")
+                row += 1
 
         quality = getattr(analysis, "quality", None)
         if quality is not None:
@@ -1697,3 +1760,160 @@ class ExcelReportWriter(GenericReportMixin, RequestReportMixin):
         self._body(ws, row - max(len(analysis.tables), 1), row - 1, 1, 7)
         self._widths(ws, {"A": 22, "B": 16, "C": 18, "D": 12, "E": 12, "F": 70, "G": 50, "H": 20, "I": 50})
         self._print_setup(ws)
+
+    # ------------------------------------------------------------------ #
+    def _quality_gate_sheet(self, wb: Workbook, analysis: AnalysisResult) -> None:
+        """Audit-only view of the central quality gate before final delivery."""
+
+        from local_office_ai.quality import GATE_STATUS_FA, GateStatus
+
+        gate = getattr(analysis, "quality_gate", None)
+        ws = wb.create_sheet("دروازه کیفیت")
+        self._rtl(ws)
+        self._title(ws, "دروازه کیفیت یکپارچه — وضعیت هر مرحله", 6)
+        ws["A2"] = (
+            "این برگه شواهد مراحل ۱ تا ۱۱ را پیش از نوشتن سند نهایی نشان می‌دهد؛ "
+            "درستی قالب خروجی و یکپارچگی سند در JSON نتیجه اجرا ثبت می‌شود."
+        )
+        ws.merge_cells("A2:F2")
+        ws["A2"].font = Font(name=FONT_NAME, size=9, color=DARK)
+        ws["A2"].alignment = Alignment(horizontal="right", vertical="center", wrap_text=True)
+        if gate is None:
+            ws.cell(4, 1, "دروازه کیفیت برای این تحلیل اجرا نشد.")
+            self._widths(ws, {"A": 34, "B": 40, "C": 14, "D": 14, "E": 14, "F": 70})
+            self._print_setup(ws)
+            return
+        counts = gate.counts()
+        self._header(
+            ws,
+            4,
+            ["مرحله", "خلاصه شواهد", "وضعیت", "مسدودکننده", "تعداد بررسی", "یافته‌های غیرقبول"],
+        )
+        row = 5
+        colors = {
+            GateStatus.PASS: GREEN,
+            GateStatus.WARNING: YELLOW,
+            GateStatus.FAIL: RED,
+        }
+        for stage in gate.stages:
+            self._value_cell(ws, row, 1, stage.label_fa)
+            self._value_cell(ws, row, 2, stage.summary)
+            self._value_cell(ws, row, 3, GATE_STATUS_FA.get(stage.status, stage.status.value))
+            self._value_cell(ws, row, 4, "بله" if stage.blocking else "خیر")
+            self._value_cell(ws, row, 5, len(stage.checks))
+            issues = [check.message for check in stage.checks if check.status is not GateStatus.PASS]
+            self._value_cell(ws, row, 6, "؛ ".join(issues[:5]) or "—")
+            self._fill(ws.cell(row, 3), colors.get(stage.status, GREY))
+            row += 1
+        self._body(ws, 5, row - 1, 1, 6)
+
+        row += 1
+        self._section(ws, row, "جمع‌بندی دروازه کیفیت", 6)
+        row += 1
+        self._value_cell(ws, row, 1, "وضعیت کلی")
+        self._value_cell(ws, row, 2, GATE_STATUS_FA.get(gate.status, gate.status.value))
+        self._fill(ws.cell(row, 2), colors.get(gate.status, GREY))
+        self._value_cell(
+            ws,
+            row,
+            3,
+            f"PASS {counts.get('PASS', 0)} / WARNING {counts.get('WARNING', 0)} / FAIL {counts.get('FAIL', 0)}",
+        )
+        ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=6)
+        row += 1
+        self._value_cell(ws, row, 1, "ادعای گزارش معتبر")
+        self._value_cell(ws, row, 2, "بله" if gate.can_claim_valid_report else "خیر")
+        self._fill(ws.cell(row, 2), GREEN if gate.can_claim_valid_report else RED)
+        self._value_cell(
+            ws,
+            row,
+            3,
+            "بدون شکست مسدودکننده" if gate.can_claim_valid_report else "شکست مسدودکننده دارد",
+        )
+        ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=6)
+        row += 1
+        if gate.provenance is not None:
+            ledger_counts = gate.provenance.counts()
+            self._value_cell(ws, row, 1, "رکوردهای ردیابی منبع")
+            self._value_cell(
+                ws,
+                row,
+                2,
+                f"مهم: {ledger_counts.get('important', 0)} / کامل: {ledger_counts.get('complete', 0)}",
+            )
+            self._value_cell(
+                ws,
+                row,
+                3,
+                f"بدون منبع مشتق: {len(gate.provenance.derived_without_sources)}",
+            )
+            ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=6)
+            row += 1
+        self._widths(ws, {"A": 34, "B": 52, "C": 16, "D": 14, "E": 14, "F": 80})
+        self._print_setup(ws)
+
+    # ------------------------------------------------------------------ #
+    def _provenance_sheet(self, wb: Workbook, analysis: AnalysisResult) -> None:
+        """Audit-only, machine-readable trail from each result to its cells."""
+
+        ledger = getattr(analysis, "provenance", None)
+        ws = wb.create_sheet("ردیابی منبع (شواهد)")
+        self._rtl(ws)
+        self._title(ws, "شواهد ردیابی منبع — هر مقدار مهم تا سلول‌های مبنا", 14)
+        headers = [
+            "کلید",
+            "فایل",
+            "برگه",
+            "بلوک",
+            "سلول/محدوده",
+            "عنوان اصلی",
+            "عنوان نرمال‌شده",
+            "مقدار اصلی",
+            "مقدار نرمال‌شده",
+            "دوره",
+            "واحد",
+            "عملیات",
+            "فرمول/تحول",
+            "منبع‌های وابسته",
+            "وضعیت اعتبار",
+        ]
+        self._header(ws, 3, headers)
+        records = list(getattr(ledger, "records", []) or []) if ledger is not None else []
+        row = 4
+        for record in records:
+            self._value_cell(ws, row, 1, record.key)
+            self._value_cell(ws, row, 2, record.filename)
+            self._value_cell(ws, row, 3, record.sheet)
+            self._value_cell(ws, row, 4, record.block)
+            self._value_cell(ws, row, 5, record.cell)
+            self._value_cell(ws, row, 6, record.original_label)
+            self._value_cell(ws, row, 7, record.normalized_label)
+            self._value_cell(ws, row, 8, record.original_value)
+            self._value_cell(ws, row, 9, record.normalized_value)
+            self._value_cell(ws, row, 10, record.period)
+            self._value_cell(ws, row, 11, record.unit)
+            self._value_cell(ws, row, 12, record.operation)
+            self._value_cell(ws, row, 13, record.formula)
+            sources = "؛ ".join(
+                f"{source.sheet}!{source.cell}".strip("!")
+                for source in record.sources
+                if source.sheet or source.cell
+            )
+            self._value_cell(ws, row, 14, sources or "—")
+            self._value_cell(ws, row, 15, record.validation_status)
+            if not record.complete:
+                self._fill(ws.cell(row, 5), YELLOW)
+            row += 1
+        if row == 4:
+            ws.cell(4, 1, "هیچ رکورد ردیابی منبعی وجود ندارد.")
+        else:
+            self._body(ws, 4, row - 1, 1, 15)
+            ws.auto_filter.ref = f"A3:O{row - 1}"
+            ws.freeze_panes = "A4"
+        widths = {
+            "A": 34, "B": 22, "C": 18, "D": 20, "E": 16, "F": 26, "G": 30,
+            "H": 22, "I": 24, "J": 18, "K": 12, "L": 26, "M": 34, "N": 48, "O": 14,
+        }
+        self._widths(ws, widths)
+        self._print_setup(ws)
+

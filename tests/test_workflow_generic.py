@@ -10,6 +10,7 @@ from local_office_ai.app.coordinator import Coordinator
 from local_office_ai.app.workflow import ExcelIntelligenceWorkflow
 from local_office_ai.core.models import MatchStatus, TableKind
 from local_office_ai.excel.reader import file_sha256
+from local_office_ai.quality import GateStage, GateStatus
 
 
 def test_generic_workbook_is_understood(settings, generic_workbook):
@@ -31,7 +32,10 @@ def test_generic_workbook_full_run(settings, generic_workbook, tmp_path):
     result = Coordinator(settings, console=False).run(
         generic_workbook, use_ai=False, output=tmp_path / "generic_out.xlsx"
     )
-    assert result.status == "completed"
+    assert result.status == "completed_with_warnings"
+    assert result.quality_gate is not None
+    assert result.quality_gate.is_complete_success is False
+    assert result.quality_gate.status_for(GateStage.FILE_READABILITY) is GateStatus.WARNING
     assert file_sha256(generic_workbook) == before
     workbook = openpyxl.load_workbook(result.output_path)
     assert "داده استانداردشده" in workbook.sheetnames
@@ -67,7 +71,8 @@ def test_workbook_without_table_does_not_crash(settings, no_table_workbook, tmp_
     result = Coordinator(settings, console=False).run(
         no_table_workbook, use_ai=False, output=tmp_path / "empty_out.xlsx"
     )
-    assert result.status == "completed"
+    assert result.status == "completed_with_warnings"
+    assert result.quality_gate.is_complete_success is False
     workbook = openpyxl.load_workbook(result.output_path)
     assert "داشبورد" in workbook.sheetnames
     workbook.close()
@@ -135,7 +140,8 @@ def test_unknown_structure_requires_confirmation(settings, make_workbook, tmp_pa
         path, use_ai=False, output=tmp_path / "vague_out.xlsx", confirm_structure=confirm
     )
     assert calls, "confirmation callback must be consulted"
-    assert result.status == "completed"
+    assert result.status == "completed_with_warnings"
+    assert result.quality_gate.is_complete_success is False
 
 
 def test_confirmation_can_abort(settings, make_workbook, tmp_path):

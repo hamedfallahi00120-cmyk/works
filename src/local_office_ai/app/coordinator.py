@@ -118,7 +118,24 @@ class Coordinator:
         critical = [item for item in analysis.anomalies if item.severity is Severity.CRITICAL]
         if critical:
             lines.append(f"{len(critical)} مورد بحرانی نیازمند بررسی است.")
-        lines.append(f"وضعیت: {result.status}")
+        gate = getattr(result, "quality_gate", None)
+        if gate is not None:
+            counts = gate.counts()
+            lines.append(
+                f"دروازه کیفیت: {gate.status.label_fa} "
+                f"(PASS {counts.get('PASS', 0)} / WARNING {counts.get('WARNING', 0)} / "
+                f"FAIL {counts.get('FAIL', 0)})"
+            )
+            if gate.blocked:
+                lines.append("ادعای گزارش معتبر: خیر — شکست مسدودکننده وجود دارد.")
+            elif not gate.is_complete_success:
+                lines.append("ادعای موفقیت کامل: خیر — هشدار یا رد ثبت‌شده است.")
+        status_labels = {
+            "completed": "تکمیل شد",
+            "completed_with_warnings": "با هشدار تکمیل شد",
+            "failed": "ناموفق — گزارش معتبر نیست",
+        }
+        lines.append(f"وضعیت: {status_labels.get(result.status, result.status)}")
         lines.append(f"خروجی: {result.output_path}")
         lines.append(f"لاگ: {self.log_path}")
         if result.errors:
