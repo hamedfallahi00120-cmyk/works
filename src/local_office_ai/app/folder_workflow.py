@@ -25,10 +25,18 @@ from local_office_ai.core.exceptions import EngineError
 from local_office_ai.core.logging_config import get_logger
 from local_office_ai.core.models import to_excel_number
 from local_office_ai.core.settings import Settings
+from local_office_ai.excel.accident_semantics import (
+    build_accident_semantics,
+    combine_accident_semantics,
+)
 from local_office_ai.excel.duplicate_control import (
     AGGREGATION_STATUS_FA,
     AggregationStatus,
     DuplicateControlAnalyzer,
+)
+from local_office_ai.excel.indicator_periods import (
+    build_indicator_periods,
+    combine_indicator_periods,
 )
 from local_office_ai.excel.period_integration import PeriodIntegration
 from local_office_ai.excel.report_writer import ExcelReportWriter
@@ -36,9 +44,14 @@ from local_office_ai.excel.semantic_matching import match_across_sources
 from local_office_ai.quality import GateStatus, QualityGate
 from local_office_ai.reporting.formats import (
     OutputFormat,
+    ReportFormatError,
     ensure_extension_matches,
     ensure_xlsx_delivery,
+    resolve_output_intent,
 )
+from local_office_ai.reporting.generator import ReportGenerator
+from local_office_ai.reporting.multi_source import build_folder_content
+from local_office_ai.reporting.specification import ReportSpecification
 
 LOGGER = get_logger(__name__)
 
@@ -100,7 +113,10 @@ class FolderResult:
     period: str = ""
     matching: Any = None
     duplicate_control: Any = None
+    indicator_periods: Any = None
+    accident_semantics: Any = None
     quality_gate: Any = None
+    report: Any = None
     warnings: list[str] = field(default_factory=list)
     status: str = "completed"
 
@@ -121,10 +137,25 @@ class FolderResult:
                 if hasattr(self.duplicate_control, "to_dict")
                 else self.duplicate_control
             ),
+            "indicator_periods": (
+                self.indicator_periods.to_dict()
+                if hasattr(self.indicator_periods, "to_dict")
+                else self.indicator_periods
+            ),
+            "accident_semantics": (
+                self.accident_semantics.to_dict()
+                if hasattr(self.accident_semantics, "to_dict")
+                else self.accident_semantics
+            ),
             "quality_gate": (
                 self.quality_gate.to_dict()
                 if hasattr(self.quality_gate, "to_dict")
                 else self.quality_gate
+            ),
+            "report": (
+                self.report.to_dict()
+                if hasattr(self.report, "to_dict")
+                else self.report
             ),
             "files": [item.to_dict() for item in self.files],
             "warnings": list(self.warnings),
@@ -156,14 +187,40 @@ class FolderWorkflow:
         output_format: str | None = None,
         profile: str = "clean",
         selected: Sequence[Path | str] | None = None,
+        sources: Sequence[Path | str] | None = None,
+        template: Path | str | None = None,
+        keep_template_figures: bool = False,
     ) -> FolderResult:
         source = Path(folder).expanduser().resolve()
-        if not source.is_dir():
-            raise EngineError(f"پوشه پیدا نشد: {source}")
-        files = self.scan(source)
+        if sources is not None:
+            files = [Path(item).expanduser().resolve() for item in sources]
+            missing = [path for path in files if not path.is_file()]
+            if missing:
+                raise EngineError(
+                    "فایل منبع پیدا نشد: " + "، ".join(str(path) for path in missing)
+                )
+            if not files:
+                raise EngineError("هیچ فایل منبعی انتخاب نشد.")
+            if not source.is_dir():
+                source = Path(os.path.commonpath([str(path.parent) for path in files]))
+        else:
+            if not source.is_dir():
+                raise EngineError(f"پوشه پیدا نشد: {source}")
+            files = self.scan(source)
         if selected is not None:
             allowed = {Path(item).expanduser().resolve() for item in selected}
             files = [path for path in files if path.resolve() in allowed]
+        intent = resolve_output_intent(
+            explicit_format=output_format,
+            output_path=output,
+            request_text=request,
+            default=self._default_output_format(),
+        )
+        if template and intent.output_format is not OutputFormat.DOCX:
+            raise ReportFormatError(
+                "قالب Word فقط با خروجی Word (docx) پذیرفته می‌شود؛ "
+                "قالب با قالب خروجی انتخاب‌شده هم‌خوان نیست."
+            )
         result = FolderResult(folder=str(source), request=(request or "").strip())
         if not files:
             result.status = "no_files"
@@ -233,17 +290,55 @@ class FolderWorkflow:
             ],
             matching=result.matching,
         )
-
-        output_path = ensure_xlsx_delivery(
-            output_path=output,
-            default_output_path=self._default_output(source),
-            explicit_format=output_format,
-            request_text=request,
-            context="گزارش پوشه",
+        result.indicator_periods = combine_indicator_periods(
+            build_indicator_periods(item.analysis, source=item.name)
+            for item in result.files
+            if item.analysis is not None
         )
-        writer = FolderReportWriter(self.settings)
-        result.output_path = str(writer.build_folder(result, merged, output_path))
-        quality_gate = QualityGate().evaluate_folder(result)
+        result.accident_semantics = combine_accident_semantics(
+            build_accident_semantics(item.analysis, source=item.name)
+            for item in result.files
+            if item.analysis is not None
+        )
+
+        specification = None
+        generation = None
+        if intent.output_format is OutputFormat.DOCX:
+            output_path = self._docx_output(source, output)
+            template_path = self._resolve_template(template)
+            specification = ReportSpecification(
+                output_format=OutputFormat.DOCX,
+                output_path=output_path,
+                profile=profile,
+                template_path=template_path,
+                preserve_template_figures=keep_template_figures,
+                request=request or "",
+                evidence=intent.evidence,
+            )
+            specification.validate()
+            QualityGate().evaluate_folder(result)
+            content = build_folder_content(
+                result, request=request or "", generated_at=datetime.now()
+            )
+            content.ensure_valid()
+            generation = ReportGenerator(self.settings).generate(
+                specification, content=content
+            )
+            result.report = generation
+            result.output_path = str(generation.output_path)
+        else:
+            output_path = ensure_xlsx_delivery(
+                output_path=output,
+                default_output_path=self._default_output(source),
+                explicit_format=output_format,
+                request_text=request,
+                context="گزارش پوشه",
+            )
+            writer = FolderReportWriter(self.settings)
+            result.output_path = str(writer.build_folder(result, merged, output_path))
+        quality_gate = QualityGate().evaluate_folder(
+            result, specification=specification, generation=generation
+        )
         if quality_gate.blocked:
             result.status = "failed"
             result.warnings.append(
@@ -291,10 +386,31 @@ class FolderWorkflow:
         except (zipfile.BadZipFile, OSError):
             return False
 
+    def _default_output_format(self) -> OutputFormat:
+        return OutputFormat.from_token(self.settings.report_format) or OutputFormat.XLSX
+
     def _default_output(self, folder: Path) -> Path:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         target = self.settings.output_dir / f"{folder.name}_Folder_Analysis_{stamp}.xlsx"
         return target
+
+    def _docx_output(self, folder: Path, output: Path | str | None) -> Path:
+        if output is not None:
+            return Path(output).expanduser().resolve()
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return (
+            self.settings.output_dir
+            / f"{folder.name}_MultiSource_{stamp}.docx"
+        ).resolve()
+
+    def _resolve_template(self, value: Path | str | None) -> Path | None:
+        candidate = value or self.settings.docx_template or None
+        if candidate in (None, ""):
+            return None
+        path = Path(candidate).expanduser()
+        if not path.is_absolute():
+            path = (self.settings.project_root / path).resolve()
+        return path
 
     @staticmethod
     def _merge(outcomes: list[FileOutcome]) -> PeriodIntegration | None:

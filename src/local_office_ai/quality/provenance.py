@@ -570,6 +570,26 @@ def _add_reconciliation_records(
         )
 
 
+def _metric_range(analysis: Any, sheet: str, metric: str) -> str:
+    """The cell range a column total was summed from, when no total row exists."""
+
+    extraction = getattr(analysis, "extraction", None)
+    sheet_model = extraction.sheet(sheet) if extraction is not None and hasattr(extraction, "sheet") else None
+    if sheet_model is None:
+        return ""
+    for block in getattr(sheet_model, "blocks", []):
+        boundaries = getattr(block, "boundaries", {}) or {}
+        first = boundaries.get("first_data_row")
+        last = boundaries.get("block_end_row") or boundaries.get("last_data_row")
+        if not first or not last:
+            continue
+        for column in getattr(block, "columns", []):
+            header = str(getattr(column, "header", "") or "")
+            if header == metric or header.startswith(metric):
+                return f"{column.letter}{first}:{column.letter}{last}"
+    return ""
+
+
 def _add_period_records(
     ledger: ProvenanceLedger,
     analysis: Any,
@@ -589,6 +609,8 @@ def _add_period_records(
                 continue
             sheet = str(getattr(cell, "source", "") or primary_sheet)
             address = str(getattr(cell, "total_address", "") or "")
+            if not address:
+                address = _metric_range(analysis, sheet, metric)
             period = f"{getattr(cell, 'month', '')} {getattr(cell, 'period', '')}".strip()
             declared = getattr(cell, "declared_total", None)
             verification = status_of(getattr(cell, "verification", "")) or GateStatus.PASS
@@ -750,4 +772,91 @@ def build_provenance_ledger(
     _add_period_records(ledger, analysis, filename, columns, cells)
     _add_answer_records(ledger, analysis, filename, primary_metrics, cells)
     _link_related_records(ledger)
+    return ledger
+
+
+def add_indicator_provenance(ledger: ProvenanceLedger, report: Any) -> ProvenanceLedger:
+    """Record each cross-period indicator cell pair in the ledger.
+
+    The comparison is derived, so it must point to both source cells.  A
+    missing side keeps the record important and marks its validation status,
+    because a comparison without one value is evidence, not a defect to hide.
+    """
+
+    for comparison in getattr(report, "comparisons", []) or []:
+        indicator = str(getattr(comparison, "indicator", "") or "")
+        if not indicator:
+            continue
+        sources: list[ProvenanceSource] = []
+        for address, period, value in (
+            (
+                getattr(comparison, "previous_address", ""),
+                getattr(comparison, "previous_period", ""),
+                getattr(comparison, "previous", None),
+            ),
+            (
+                getattr(comparison, "current_address", ""),
+                getattr(comparison, "current_period", ""),
+                getattr(comparison, "current", None),
+            ),
+        ):
+            if not address:
+                continue
+            sources.append(
+                ProvenanceSource(
+                    filename=str(getattr(comparison, "source", "") or ""),
+                    sheet=str(getattr(comparison, "sheet", "") or ""),
+                    block=str(getattr(comparison, "block", "") or ""),
+                    cell=str(address),
+                    label=indicator,
+                    original_value=_text(value),
+                    normalized_value=_text(value),
+                    period=str(period or ""),
+                    note="سلول منبع مقایسه دوره‌ای",
+                )
+            )
+        key = (
+            "indicator."
+            + indicator.replace(" ", "_")
+            + f".{getattr(comparison, 'previous_period', '')}."
+            + f"{getattr(comparison, 'current_period', '')}"
+        )
+        previous_value = getattr(comparison, "previous", None)
+        current_value = getattr(comparison, "current", None)
+        if previous_value is None and current_value is None:
+            continue
+        recorded = current_value if current_value is not None else previous_value
+        status = (
+            GateStatus.PASS
+            if previous_value is not None and current_value is not None
+            else GateStatus.WARNING
+        )
+        ledger.add(
+            ProvenanceRecord(
+                key=key,
+                filename=str(getattr(comparison, "source", "") or ""),
+                sheet=str(getattr(comparison, "sheet", "") or ""),
+                block=str(getattr(comparison, "block", "") or ""),
+                cell=str(
+                    getattr(comparison, "current_address", "")
+                    or getattr(comparison, "previous_address", "")
+                ),
+                original_label=indicator,
+                normalized_label=indicator,
+                original_value=_text(recorded),
+                normalized_value=_text(recorded),
+                period=(
+                    f"{getattr(comparison, 'previous_period', '')}"
+                    f"→{getattr(comparison, 'current_period', '')}"
+                ),
+                unit=str(getattr(comparison, "unit", "") or ""),
+                operation="مقایسه دوره",
+                formula="",
+                validation_status=status.value,
+                sources=sources,
+                derived=True,
+                important=True,
+                notes=[str(getattr(comparison, "status_label", "") or "")],
+            )
+        )
     return ledger

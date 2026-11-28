@@ -341,6 +341,7 @@ class SheetIntelligence:
     period_status: str = "not_detected"
     period_confidence: float = 0.0
     year_pairs: list[dict[str, Any]] = field(default_factory=list)
+    row_oriented_periods: bool = False
     derived: bool = False
     referenced_sheets: list[str] = field(default_factory=list)
     formula_cells: int = 0
@@ -404,6 +405,7 @@ class SheetIntelligence:
             "period_status": self.period_status,
             "period_confidence": round(self.period_confidence, 3),
             "year_pairs": list(self.year_pairs),
+            "row_oriented_periods": self.row_oriented_periods,
             "derived": self.derived,
             "referenced_sheets": list(self.referenced_sheets),
             "formula_cells": self.formula_cells,
@@ -523,6 +525,7 @@ class StructureIntelligenceAnalyzer:
         intel.subheader_years = self._unique_periods(primary.columns)
         intel.filename_years = extract_periods([source_name]) if source_name else []
         intel.year_pairs = self._build_pairs(primary.columns)
+        intel.row_oriented_periods = self._row_oriented(primary.columns)
         self._apply_periods(
             intel,
             detect_periods(self._period_sources(grid, primary, intel.title, source_name)),
@@ -1319,6 +1322,48 @@ class StructureIntelligenceAnalyzer:
                     if name in known_sheets and name != grid.sheet_name and name not in references:
                         references.append(name)
         return bool(references), references
+
+    @staticmethod
+    def _row_oriented(columns: list[ColumnProfile]) -> bool:
+        """Indicators in rows and at least two period-scoped measure columns.
+
+        Its column totals belong to one indicator each, so a monthly metric
+        series built from them would invent a metric named after the year.
+        """
+
+        measures = {
+            DataRole.NUMERIC_MEASURE,
+            DataRole.CALCULATED,
+        }
+        period_columns = [
+            column
+            for column in columns
+            if getattr(column, "period", "") and column.statistical_role in measures
+        ]
+        periods = {str(getattr(column, "period", "")) for column in period_columns}
+        if len(periods) < 2:
+            return False
+        bases = {
+            re.sub(
+                r"(?<!\d)(?:1[34]\d{2}|19\d{2}|20\d{2})(?!\d)",
+                " ",
+                str(getattr(column, "parent_header", "") or column.header or ""),
+            ).strip()
+            for column in period_columns
+        }
+        bases = {base for base in bases if base}
+        if len(bases) >= 2:
+            # Different indicators sit side by side, one column per period.
+            return True
+        if bases:
+            return False
+        label_columns = [
+            column
+            for column in columns
+            if column.statistical_role in {DataRole.CATEGORICAL, DataRole.GROUP}
+            and int(getattr(column, "distinct", 0)) >= 2
+        ]
+        return bool(label_columns)
 
     def _column_totals(
         self,

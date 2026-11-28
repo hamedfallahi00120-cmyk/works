@@ -24,6 +24,7 @@ from local_office_ai.excel.normalization import (
     normalize_text,
     parse_value,
 )
+from local_office_ai.excel.period_alignment import parse_period
 from local_office_ai.excel.semantic_vocabulary import identifier_evidence
 
 SUBTOTAL_KEYWORDS = (
@@ -587,6 +588,38 @@ class SheetAnalyzer:
     # ------------------------------------------------------------------ #
     # Header detection
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _is_period_header_row(cells: list[Any]) -> bool:
+        """A label column followed by reporting periods is a header.
+
+        ``شاخص | 1404 | 1405`` and ``شاخص | تعداد 1404 | تعداد 1405`` are both
+        headers in administrative workbooks.  Every cell except an optional
+        leading label must carry a real period, and a summary label may not
+        lead the row, so a totals row is not promoted to a header.
+        """
+        periods = []
+        labels = []
+        for cell in cells:
+            value = cell.value
+            if value in (None, ""):
+                return False
+            parsed = parse_period(value)
+            if parsed is not None and parsed.year is not None:
+                periods.append(parsed)
+            elif isinstance(value, str) and not looks_like_number(value):
+                labels.append(value)
+            else:
+                return False
+        if len(periods) < 2 or len(labels) > 1:
+            return False
+        if labels:
+            label = normalize_text(normalize_digits(str(labels[0]))).strip()
+            if not label or summary_label_role(label) is not None:
+                return False
+            if label in {"شرح / مؤسسه", "شرح", "ردیف", "row"}:
+                return False
+        return len({period.label for period in periods}) == len(periods)
+
     def score_header(self, row: int, first_col: int, last_col: int, region_end: int) -> HeaderCandidate | None:
         header_cells = [
             cell
@@ -609,9 +642,10 @@ class SheetAnalyzer:
                     text_like += 1
             else:
                 numeric_like += 1
-        if text_like < 2:
+        period_header = text_like >= 1 and self._is_period_header_row(header_cells)
+        if text_like < 2 and not period_header:
             return None
-        if numeric_like and text_like < 3:
+        if numeric_like and text_like < 3 and not period_header:
             # A row that is mostly numbers (a totals row or a label/value row) is not a header.
             return None
         for cell in header_cells:
@@ -642,6 +676,9 @@ class SheetAnalyzer:
                     ratios.append(numeric / total)
             numeric_below = sum(ratios) / len(ratios) if ratios else 0.0
 
+        if period_header and numeric_below < 0.5:
+            return None
+
         non_empty = len(header_cells)
         text_ratio = text_like / non_empty
         row_numeric_ratio = numeric_like / non_empty
@@ -650,6 +687,9 @@ class SheetAnalyzer:
             f"header text cells={text_like}/{non_empty}",
             f"numeric data below={numeric_below:.2f}",
         ]
+        if period_header:
+            reasons.append("label column with reporting-year headers")
+            score += 0.1
         if numeric_below < 0.2:
             reasons.append("almost no numeric data below; header is doubtful")
             score -= 0.2

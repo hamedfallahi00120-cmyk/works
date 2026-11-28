@@ -499,6 +499,9 @@ class PeriodIntegrator:
             if getattr(sheet, "derived", False):
                 integration.excluded_sources.append(sheet.sheet)
                 continue
+            if getattr(sheet, "row_oriented_periods", False):
+                integration.excluded_sources.append(sheet.sheet)
+                continue
             month = getattr(sheet, "month", "") or ""
             month_index = getattr(sheet, "month_index", None)
             if not month or month_index is None:

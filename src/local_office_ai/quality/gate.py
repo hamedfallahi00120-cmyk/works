@@ -144,7 +144,13 @@ class QualityGate:
             finalized=generation is not None,
         )
 
-    def evaluate_folder(self, result: Any) -> QualityGateReport:
+    def evaluate_folder(
+        self,
+        result: Any,
+        *,
+        specification: Any = None,
+        generation: Any = None,
+    ) -> QualityGateReport:
         """Evaluate a multi-file folder run with the same thirteen stages."""
 
         outcomes = [
@@ -185,6 +191,10 @@ class QualityGate:
                         ],
                     )
                 )
+
+        from local_office_ai.quality.provenance import add_indicator_provenance
+
+        add_indicator_provenance(merged, getattr(result, "indicator_periods", None))
 
         stages: list[GateStageResult] = []
         for stage in STAGE_ORDER[:-2]:
@@ -229,10 +239,10 @@ class QualityGate:
                 checks=findings,
             )
 
-        output_path = str(getattr(result, "output_path", "") or "")
-        specification = None
-        generation = None
-        if output_path:
+        output_path = str(
+            getattr(generation, "output_path", "") or getattr(result, "output_path", "") or ""
+        )
+        if specification is None and generation is None and output_path:
             from local_office_ai.reporting import (
                 OutputFormat,
                 ReportGenerationResult,

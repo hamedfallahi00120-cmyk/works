@@ -303,7 +303,7 @@ merge of Prompt 01B). No cross-source aggregation was added.
   «کیفیت داده (تفصیلی)» sheets (the latter includes a block column); the clean
   «اعتبارسنجی داده» sheet gains a compact quality summary and lists non-`PASS`
   findings only.
-- `tests/test_semantic_quality.py` (new, 23 tests) covers the eight required
+- `tests/test_semantic_quality.py` (new, 24 tests) covers the eight required
   cases with real openpyxl workbooks, plus administrative/vehicle/region/record and
   plural identifiers, English and Arabic-Indic digits, all-text measure columns,
   category headers that mention a measure word, metadata evidence, cross-source period
@@ -498,7 +498,7 @@ PR #8 open, not merged to `main`. Base: `main` at `891b662` (PR #7 merged).
   «تطبیق معنایی منابع» with matched/probable/ambiguous/rejected decisions, Persian
   period/unit labels, period status, comparability and reasons; the clean profile never
   writes it.
-- `tests/test_semantic_matching.py` (new, 23 tests) covers the seven required cases
+- `tests/test_semantic_matching.py` (new, 24 tests) covers the seven required cases
   with real openpyxl workbooks: different names, similar names for different
   indicators, different period formats, Persian/Gregorian date references, different
   unit dimensions, unit scale, missing periods, ambiguity, category-value overlap
@@ -668,7 +668,7 @@ Branch: `feature/prompt-04a-output-format-docx-template`, created from `main` at
   source addresses are built without stray `!`/`None` segments.
 - DOCX output uses a unique temporary file, so a template named like the old temp path
   (`report.tmp.docx`) is never overwritten.
-- `tests/test_report_output_formats.py` now has 23 tests; the new cases cover configured
+- `tests/test_report_output_formats.py` now has 24 tests; the new cases cover configured
   template isolation, folder template rejection, zero answers, input-file references and
   template preservation during atomic output.
 
@@ -888,3 +888,80 @@ libraries are unavailable in this sandbox.
 - Word rendering on Windows; DOCX integrity is checked on the OOXML package with
   python-docx and XML parsing.
 - Ollama/Qwen narrative, ComfyUI, LibreHardwareMonitor, Tkinter and PySide6 runtime.
+
+## Prompt 05B — end-to-end acceptance and false-success prevention
+
+### Status [SBX]
+
+Prompt 05B is implemented on `feature/prompt-05b-end-to-end-acceptance` (from main
+`96f1e1a`). The owner's real acceptance files were not available, so the real-file
+acceptance remains **unverified**. The pipeline and the honesty rules were exercised with
+real openpyxl workbooks and real DOCX packages created by the test suite.
+
+### Files
+
+- `excel/indicator_periods.py` — row-oriented `شاخص | 1404 | 1405` extraction and
+  per-indicator `Decimal` comparison; declared totals kept separate and comparisons are
+  grouped per source file, so one file's previous period is never paired with another
+  file's current period.
+- `excel/accident_semantics.py` — accident-count / fatal-accident / fatality /
+  injury-accident / injured-person / damage separation and missing-statistics reporting;
+  a bare severity label (`فوتی`, `جرحی`) is flagged as ambiguous instead of being silently
+  equated with a casualty count.
+- `reporting/multi_source.py` — validated Persian content for folder/multi-source DOCX.
+- `quality/acceptance.py` — `AcceptanceRunner`, exact-label checkpoint verification,
+  cross-source row-indicator matching and the fifteen-section JSON/Markdown audit with
+  semantic roles, per-source comparisons, duplicate groups, decisions, accident findings
+  and provenance samples.
+- `excel/statistical_reconciliation.py` — two labels that both contain an overlap word
+  (`سایر`, `متفرقه`, `other`) are refused as a justified sum.
+- `app/folder_workflow.py` — folder DOCX routing, format/template validation, DOCX gate.
+- `quality/provenance.py` — `add_indicator_provenance` for cross-period cell pairs.
+- `excel/structure_intelligence.py`, `excel/period_integration.py`,
+  `excel/sheet_analyzer.py` — row-oriented period headers, totals-row rejection and no
+  fabricated year-metric series.
+- `ui/cli.py` — `--acceptance`, `--acceptance-input`, `--checkpoints`,
+  `--acceptance-dir`; folder `--format docx` and optional template.
+- `tests/test_end_to_end_acceptance.py` — 24 tests.
+
+### Test evidence [SBX]
+
+```text
+python -m pytest tests/test_end_to_end_acceptance.py -o addopts="" -q
+-> 24 passed in 6.02s (exit 0)
+
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+-> 378 passed, 6 skipped, 36 deselected in 54.64s (exit 0)
+```
+
+The 36 deselected tests remain `requires_sample`; the 6 skips are optional GUI/monitoring
+dependencies. Neither is counted as a passing acceptance test.
+
+### Behavior guarantees
+
+- A synthetic verified workbook reaches `accepted` only when all acceptance checks pass;
+  the generated DOCX is reopened and validated and every important number has a source
+  cell.
+- Two Excel sources with adjacent periods stay separate: 8 within-file comparisons are
+  produced, never a comparison across files; equivalent row indicators are reported as
+  matches without claiming they are numerically comparable.
+- A near-match checkpoint label, a label repeated in several files without a unique
+  cross-file period pair, or a missing declared Word reference yields
+  `unverified`/`partial`, never a forced confirmation. A unique earliest/latest pair in
+  two different files may verify a checkpoint for auditing, with an explicit scope
+  caveat and without inserting the comparison into the report.
+- A non-DOCX acceptance output is `failed` (`wrong_output_format` + `invalid_docx`), not
+  accepted.
+- A wrong checkpoint produces `failed` and a note; the report keeps the independently
+  extracted value.
+- Conflicting period evidence produces `period_not_identified` + `critical_validation_failed`,
+  not success.
+- Missing real input files produce `unverified` with exit code 5 and no report file.
+- Accident counts are never equated with fatalities or injuries; missing casualty
+  statistics are declared.
+- A folder/multi-source `.docx` is written natively; a `.pdf` request is rejected.
+
+### Not validated
+
+- The three original files, their real labels/periods and the historical checkpoints.
+- Windows Word rendering/fonts, Ollama/Qwen narrative, and the owner's Windows venv.
