@@ -47,6 +47,7 @@ class Coordinator:
         output: Path | str | None = None,
         output_format: str | None = None,
         template: Path | str | None = None,
+        keep_template_figures: bool = False,
         monitor: bool | None = None,
         profile: str | None = None,
         confirm_structure: Callable[[AnalysisResult], bool] | None = None,
@@ -71,6 +72,7 @@ class Coordinator:
                 output_path=Path(output) if output else None,
                 output_format=output_format,
                 template=Path(template) if template else None,
+                keep_template_figures=keep_template_figures,
                 confirm_structure=confirm_structure,
                 report_profile=profile or self.settings.report_profile or "clean",
             )

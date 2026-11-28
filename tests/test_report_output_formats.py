@@ -158,8 +158,8 @@ def test_specification_appends_the_selected_suffix(tmp_path, docx_template):
 
     plan = ReportGenerator(_settings_for(tmp_path)).plan(spec)
     assert plan.output_format is OutputFormat.DOCX
-    assert plan.writer == "DocxTemplateRenderer"
-    assert plan.requires_template is True
+    assert plan.writer == "DocxReportWriter"
+    assert plan.requires_template is False
 
 
 # --------------------------------------------------------------------------- #
@@ -449,8 +449,15 @@ def test_missing_and_unsupported_templates_are_rejected(tmp_path):
     with pytest.raises(ReportTemplateError, match="خالی"):
         inspect_docx_template(empty)
 
-    with pytest.raises(ReportTemplateError, match="قالب DOCX"):
-        ReportSpecification(OutputFormat.DOCX, tmp_path / "report.docx").validate()
+    # A Word report no longer needs a template; a template that is requested
+    # but missing must still fail before any output is written.
+    ReportSpecification(OutputFormat.DOCX, tmp_path / "report.docx").validate()
+    with pytest.raises(ReportTemplateError, match="پیدا نشد"):
+        ReportSpecification(
+            OutputFormat.DOCX,
+            tmp_path / "report.docx",
+            template_path=missing,
+        ).validate()
 
 
 def test_excel_writer_rejects_a_word_suffix(settings, make_workbook, tmp_path):

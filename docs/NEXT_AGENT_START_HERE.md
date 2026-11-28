@@ -1,18 +1,16 @@
-# Next Agent Start Here — Prompt 04A
+# Next Agent Start Here — Prompt 04B
 
 ## Repository and starting point
 
 - Repository: `hamedfallahi00120-cmyk/works` (private).
 - Accepted Phase-0 base on `main`: `6df625659c97c0b7da1f78f33fa5fc37864a7580`.
-- Prompt 01A was merged to `main` as PR #4; `main` was at `f572c47`.
-- Prompt 01B was merged to `main` as PR #5; `main` was at `113cc1f`.
-- Prompt 02A was merged to `main` as PR #6; `main` was at `d173465`.
-- Prompt 02B was merged to `main` as PR #7; `main` is at `891b662`.
-- Dedicated Prompt 03A branch: `feature/prompt-03a-semantic-source-matching`; PR #8 is open
-  and is not merged to `main`.
-- Prompt 03B was merged to `main` as PR #9; `main` is at `18fb3d4`.
-- Dedicated Prompt 04A branch: `feature/prompt-04a-output-format-docx-template`, created
-  from `main` at `18fb3d4`; it is not merged to `main` yet.
+- Prompt 01A was merged to `main` as PR #4; Prompt 01B as PR #5 (`113cc1f`);
+  Prompt 02A as PR #6 (`d173465`); Prompt 02B as PR #7 (`891b662`); Prompt 03B as
+  PR #9 (`18fb3d4`); Prompt 04A as PR #10 (`4741a98`).
+- Prompt 03A is implemented on `feature/prompt-03a-semantic-source-matching`; PR #8
+  is open and not merged to `main`.
+- Prompt 04B is implemented on `feature/prompt-04b-docx-report-writer`, created from
+  `main` at `4741a98`; it is not merged to `main` yet.
 - The three original administrative source files and the private sample workbook are
   intentionally not stored in GitHub.
 
@@ -22,52 +20,57 @@ The Phase-0 read-only audit has already been completed. Its report is
 ## Exact status at handoff
 
 Prompt 01A — Data Model, Workbook Structure, and Metadata Extraction — is implemented
-and merged. See the Prompt 01A section in `docs/quality_evidence.md` and
-`docs/prompt_01a_technical_report.md`. Prompt 01B has its own
-`docs/prompt_01b_technical_report.md`.
+and merged. Prompt 01B, Prompt 02A, Prompt 02B, Prompt 03B and Prompt 04A are merged.
+Prompt 03A remains on its branch and PR #8.
 
-Prompt 02A was merged to `main` as PR #6. Prompt 02B — Statistical Reconciliation and
-Calculation Integrity — was merged to `main` as PR #7. **Prompt 03A — Semantic Source
-Matching and Period Alignment — is implemented on
-`feature/prompt-03a-semantic-source-matching`.** It adds `period_alignment.py` (Jalali
-and Gregorian periods, multi-month ranges and compatibility) and `semantic_matching.py`
-(controlled field matching with label, role, unit, period, row-label, identifier and
-value evidence). Identity and value comparability are separate decisions; missing or
-conflicting periods and ambiguous candidates are reported, never guessed. The audit
-profile writes «تطبیق معنایی منابع», and the folder report writes «تطبیق شاخص‌ها بین
-منابع». The branch is pushed and PR #8 is open; it is not merged to `main`. See
-`docs/quality_evidence.md` for the implementation record.
+**Prompt 04B — DOCX Report Writer and Persian RTL Rendering — is implemented on
+`feature/prompt-04b-docx-report-writer`.** It adds:
 
-**Prompt 04A — Output Format Routing and Word Template Architecture — is implemented on
-`feature/prompt-04a-output-format-docx-template`.** It adds the `reporting` package:
-`OutputFormat`/intent resolution, `ReportSpecification`/`ReportContent`,
-`inspect_docx_template`, `DocxTemplateRenderer` and `ReportGenerator`. Word output is
-template-only and never falls back to Excel; PDF is recognised but not generated. The
-CLI exposes `--format`, `--template` and `--inspect-template`. T9 is fixed. A
-configured `settings.docx_template` applies only to Word output and cannot break Excel;
-an explicit `--template` with a non-Word format, or with `--folder`, is rejected.
+- `reporting/docx_rtl.py` — real OOXML RTL: section `w:bidi`/`w:rtlGutter`, paragraph
+  `w:bidi`, run `w:rtl`/`w:bCs`, complex-script fonts and `w:szCs`, RTL tables with
+  `w:bidiVisual`, repeated shaded header rows and `PAGE`/`NUMPAGES` fields.
+- `reporting/docx_report_writer.py` — `DocxReportWriter`. Standalone mode builds a
+  complete A4 Persian report: title page, headings, executive summary, RTL tables,
+  captions, source/statistical notes, warnings, conclusions and recommendations, with
+  header/footer and page numbers. Template mode preserves layout/styles, replaces
+  placeholders, removes static historical figures (unless explicitly preserved),
+  inserts the analytical body at `{{content}}`, and skips sections the template already
+  contains.
+- `reporting/docx_validation.py` — reopens the delivered file and verifies DOCX ZIP
+  members, XML, sections, tables, RTL, page numbering, placeholders and that every
+  number is approved by `ReportContent`. An invalid file is never delivered.
+- `reporting/specification.py` — `ReportContent.from_analysis` now emits identity,
+  metrics, descriptive statistics, request answers, quality and reconciliation tables,
+  plus `placeholder_values()` and `approved_numbers()`. Model narrative is admitted only
+  when every number it quotes is approved.
+- `reporting/formats.py` / `generator.py` — DOCX writer is `DocxReportWriter` and a
+  template is optional. `ReportSpecification.preserve_template_figures` maps to
+  `strip_static_figures`.
+- `app/workflow.py` / `coordinator.py` / `ui/cli.py` — a Word request without a template
+  builds a standalone report; `--keep-template-figures` keeps template figures only when
+  explicitly requested.
 
 Recorded sandbox evidence (Linux, CPython 3.13.15, pytest 9.2.0):
 
 ```text
-python -m pytest tests/test_semantic_matching.py -o addopts="" -q
--> 23 passed in 2.11s
+python -m pytest tests/test_docx_report_writer.py -o addopts="" -q
+-> 20 passed in 7.20s
 
 python -m pytest tests/test_report_output_formats.py -o addopts="" -q
--> 23 passed in 1.08s
+-> 23 passed in 1.36s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 324 passed, 2 skipped, 36 deselected in 36.91s
+-> 340 passed, 6 skipped, 36 deselected in 46.02s
 ```
 
 The 36 deselected tests are `requires_sample`; their private workbook is absent and they
-are not counted as passing. The two skips are optional GUI/monitoring tests whose system
+are not counted as passing. The 6 skips are optional GUI/monitoring tests whose system
 libraries are unavailable in this sandbox and are not counted as passing.
 
 ## Start procedure
 
 1. Fetch the private repository and switch to
-   `feature/prompt-04a-output-format-docx-template`.
+   `feature/prompt-04b-docx-report-writer`.
 2. Verify the current branch, HEAD SHA and clean working tree. Record the exact output.
 3. Read, in this order:
    - `MASTER_PROJECT_HANDOVER_PUBLIC.txt`
@@ -77,65 +80,21 @@ libraries are unavailable in this sandbox and are not counted as passing.
    - this file
 4. Use the Phase-0 audit as the accepted baseline. Do not demand that the owner resend
    these files, repeat the audit, or perform another exploratory phase.
-5. Prompt 01A, Prompt 01B, Prompt 02A, Prompt 02B, Prompt 03A, Prompt 03B and Prompt 04A
-   are complete. Do not repeat them or substitute audit Phase 1a for them. The next
-   engineering action starts only after the owner accepts Prompt 04A.
-6. Work only on a dedicated branch for the next stage. Never commit directly to `main`.
-7. Keep later prompts out of scope until the owner authorizes them. Do not merge or push
-   to `main`.
+5. Prompts 01A, 01B, 02A, 02B, 03A, 03B, 04A and 04B are implemented. Do not repeat
+   them. Wait for the owner to accept Prompt 04B before starting the next stage.
+6. Keep Python as the only arithmetic authority, Qwen for narrative only, and every
+   report number traceable to validated `ReportContent`.
+7. Windows Word rendering and the real administrative files remain owner-side checks on
+   `F:\Local-Office-AI`. Do not recreate that environment or fabricate those files.
 
-## Test and evidence policy
+## Non-negotiable rules for the next stage
 
-Run the focused test gate and record the actual output:
-
-```bash
-python -m pytest tests -o addopts="" -q -ra -m "not requires_sample"
-```
-
-Do not rely on historical test counts; collection changes with Python, PySide6 and
-optional dependencies. Read the latest GitHub Actions run for the exact CI result.
-
-T2 and T3 are fixed by Prompt 01A and must keep passing normally. T9 is fixed by
-Prompt 04A and must keep passing normally. T4 is a normal passing guard; the audit did not
-reproduce R5.
-
-## CI execution policy
-
-The repository workflow is intentionally PR-only:
-- One Windows/Python 3.14.7 test run starts when a PR is opened.
-- A new run starts only when that PR's commit changes (`synchronize`) or the PR is reopened.
-- Documentation-only changes outside the CI path list do not start the test suite.
-- There is **no `push` trigger on `main`** and no test run is subscribed to the PR
-  merge/close event. Therefore merging an already tested PR does not repeat the suite.
-- One invocation of pytest is used. Tests marked `requires_sample` are excluded; there is
-  no second collection run or artifact upload.
-- Do not interpret this as “never test changed code”: each new source/test/dependency/
-  workflow snapshot in a PR must be validated once before merge.
-
-## Fixed project constraints
-
-- Python is the source of truth for extraction, numerical calculations and validation.
-- Qwen is for semantic interpretation and narrative only; it must not invent or calculate
-  source figures.
-- Preserve the existing architecture, UI, RTL behaviour and working functionality; do not
-  rewrite from scratch.
-- Source documents are read-only.
-- Do not recreate, modify or upgrade the owner's Windows venv or system Python.
-- Preserve `F:\work`, `legacy/`, user data and existing input documents.
-- Keep temporary and project artifacts within the previously approved locations.
-- The user's local Windows target is `F:\Local-Office-AI`, Python 3.14.7. GitHub Actions
-  is not the same as that installation.
-- Do not claim Ollama/Qwen, LibreHardwareMonitor, Tesseract, desktop UI or real-file
-  acceptance was verified unless it was actually tested on the target Windows machine.
-- Never add the original administrative documents, private sample workbook, real figures
-  or personal paths to GitHub.
-
-## Known unresolved items
-
-- T9 / G11 / R8 is fixed in Prompt 04A; keep its test passing normally.
-- T2 / G3 / R3 and T3 / G5 / R4 are fixed in Prompt 01A; keep their tests passing.
-- T4 passes; R5 was found unreachable in the audited code path.
-- The three real acceptance files and the private sample workbook are not in the
-  repository; real-file validation remains local to the owner's Windows environment.
-- Prompt 01A and Prompt 01B evidence is sandbox-only; Windows-target and real-file
-  acceptance are still owner-run.
+- One dedicated branch per stage, focused tests, actual evidence, no direct work on
+  `main`, no merge/push without owner instruction.
+- A `.docx` output must always be a real Word package; never write Excel or plain text
+  under that suffix.
+- Applying right alignment alone is not RTL. Keep `w:bidi`, `w:rtl`, `w:cs`, `w:szCs`
+  and `w:bidiVisual`; `tests/test_docx_report_writer.py` guards them.
+- A template is presentation only. Its historical figures are removed by default and
+  never become report data; `--keep-template-figures` is the only exception.
+- Reopen and validate every generated DOCX. Unsupported numbers block delivery.

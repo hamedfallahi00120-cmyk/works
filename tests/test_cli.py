@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 
 from local_office_ai.ui.cli import main
 
@@ -118,10 +119,12 @@ def test_cli_image_generation_uses_both_services(project_root, sample_path, fake
 
 
 def test_output_suffix_is_validated(make_workbook, project_root):
-    """G11 / R8: a ``.docx`` output must not receive an Excel workbook.
+    """G11 / R8: a ``.docx`` output must become a real Word document.
 
-    DOCX generation is template-based.  Without a template the request fails
-    loudly instead of writing XLSX content under a Word name.
+    Prompt 04B lets a Word request build a complete report without a template,
+    so the suffix now yields a genuine DOCX package (never XLSX content under a
+    Word name).  An explicit Excel format with a ``.docx`` name is still
+    rejected.
     """
     source = make_workbook(
         "costs.xlsx",
@@ -150,5 +153,31 @@ def test_output_suffix_is_validated(make_workbook, project_root):
             str(output),
         ]
     )
-    assert code != 0
-    assert not output.exists()
+    assert code == 0
+    assert output.exists()
+    assert zipfile.is_zipfile(output)
+    with zipfile.ZipFile(output) as archive:
+        names = archive.namelist()
+    assert "word/document.xml" in names
+    assert not any(name.startswith("xl/") for name in names)
+
+    mismatched = project_root / "wrong.docx"
+    assert (
+        main(
+            [
+                "--root",
+                str(project_root),
+                "--file",
+                str(source),
+                "--no-ai",
+                "--yes",
+                "--quiet",
+                "--format",
+                "xlsx",
+                "--output",
+                str(mismatched),
+            ]
+        )
+        == 2
+    )
+    assert not mismatched.exists()
