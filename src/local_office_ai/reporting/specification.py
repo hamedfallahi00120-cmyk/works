@@ -8,6 +8,7 @@ never allowed to supply numerical content.
 
 from __future__ import annotations
 
+import re
 import zipfile
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -20,6 +21,7 @@ from local_office_ai.excel.normalization import (
     canonical_number,
     extract_numeric_claims,
     format_jalali,
+    normalize_digits,
     parse_number,
 )
 from local_office_ai.reporting.formats import OutputFormat, ensure_extension_matches
@@ -70,8 +72,15 @@ def _status_fa(value: Any) -> str:
     }.get(raw, raw or "—")
 
 
+_DATE_CLAIM = re.compile(r"(?<!\d)(\d{4})[/-](\d{1,2})(?:[/-](\d{1,4}))?(?!\d)")
+
+
 def _canonical_numbers_in(text: str) -> set[str]:
-    """Canonical forms of every numeric claim in a text."""
+    """Canonical forms of every numeric claim in a text.
+
+    A numeric date is also kept as one claim, so ``1403/04`` cannot pass merely
+    because ``1403`` and ``4`` are approved separately.
+    """
 
     found: set[str] = set()
     for token in extract_numeric_claims(text or ""):
@@ -81,6 +90,9 @@ def _canonical_numbers_in(text: str) -> set[str]:
                 found.add(canonical_number(parsed.value))
             except (InvalidOperation, ValueError):
                 continue
+    for match in _DATE_CLAIM.finditer(normalize_digits(text or "")):
+        parts = [part for part in match.groups() if part]
+        found.add("/".join(str(int(part)) for part in parts))
     return found
 
 
@@ -121,7 +133,7 @@ class ReportSpecification:
         if not self.output_format.supports_generation:
             raise ReportFormatError(
                 f"تولید {self.output_format.label_fa} در این مرحله پشتیبانی نمی‌شود. "
-                "خروجی Excel یا گزارش Word با قالب DOCX انتخاب کنید."
+                "خروجی Excel یا گزارش Word (.docx) انتخاب کنید."
             )
         ensure_extension_matches(self.output_path, self.output_format)
         if self.profile not in SUPPORTED_PROFILES:

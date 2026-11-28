@@ -28,7 +28,6 @@ from local_office_ai.reporting.docx_rtl import (
     format_paragraph,
     iter_header_footer_containers,
     oxml,
-    paragraph_has_field,
     qn,
     set_run_rtl,
     set_section_rtl,
@@ -80,6 +79,8 @@ class DocxReportWriter:
 
     def __init__(self) -> None:
         self._skipped_template_sections: list[str] = []
+        self._template_mode = False
+        self._template_table_style: str | None = None
 
     def build(
         self,
@@ -92,6 +93,8 @@ class DocxReportWriter:
         content.ensure_valid()
         output = ensure_extension_matches(Path(output_path), OutputFormat.DOCX)
         self._skipped_template_sections = []
+        self._template_mode = template_path is not None and str(template_path).strip() != ""
+        self._template_table_style = None
         extra_allowed_numbers: tuple[str, ...] = ()
         if output.exists() and output.is_dir():
             raise ReportFormatError(
@@ -120,7 +123,8 @@ class DocxReportWriter:
             output,
             content,
             required_sections=result.sections_written,
-            minimum_tables=1 if content.tables else 0,
+            required_table_headers=[table.headers for table in content.tables],
+            minimum_tables=result.tables_written,
             require_rtl=True,
             require_page_numbers=True,
             allow_unresolved_placeholders=not result.unresolved_placeholders,
@@ -144,7 +148,9 @@ class DocxReportWriter:
         self._write_header_footer(section, content)
         self._write_title_page(document, content)
         builder = _BodyWriter(document)
-        sections = self._write_body(builder, content, existing=set())
+        sections = self._write_body(
+            builder, content, existing=set(), existing_tables={}
+        )
         _save_atomic(document, output)
         return DocxReportResult(
             output_path=output,
@@ -173,6 +179,7 @@ class DocxReportWriter:
                 f"قالب Word قابل خواندن نیست: {template.path} ({exc})"
             ) from exc
 
+        self._template_table_style = _preferred_table_style(document)
         anchor = _find_content_anchor(document)
         removed: list[str] = []
         if strip_static_figures:
@@ -198,6 +205,7 @@ class DocxReportWriter:
         anchor_only = anchor is not None and not anchor.text.strip()
 
         self._apply_rtl_to_template(document)
+        self._ensure_template_header(document, content)
         self._ensure_template_page_numbers(document, content)
 
         existing = {
@@ -208,7 +216,17 @@ class DocxReportWriter:
         builder = _BodyWriter(document, anchor=anchor, after=not anchor_only)
         if anchor is None and any(paragraph.text.strip() for paragraph in document.paragraphs):
             builder.page_break()
-        sections = self._write_body(builder, content, existing=existing)
+        existing_tables = {
+            tuple(_normalize(cell.text) for cell in table.rows[0].cells): table
+            for table in document.tables
+            if table.rows
+        }
+        sections = self._write_body(
+            builder,
+            content,
+            existing=existing,
+            existing_tables=existing_tables,
+        )
         if anchor is not None and anchor_only:
             _remove_paragraph(anchor)
 
@@ -225,11 +243,13 @@ class DocxReportWriter:
             )
         if self._skipped_template_sections:
             warnings.append(
-                "این بخش‌ها در قالب از قبل وجود داشتند و برای جلوگیری از تکرار دوباره افزوده نشدند: "
+                "این بخش‌ها یا جدول‌ها در قالب از قبل وجود داشتند و برای جلوگیری از تکرار دوباره ساخته نشدند: "
                 + "، ".join(self._skipped_template_sections)
             )
         warnings.append(
             "قالب Word فقط برای چیدمان استفاده شد؛ هیچ عددی از قالب به‌عنوان داده گزارش پذیرفته نشد."
+            if strip_static_figures
+            else "اعداد ثابت قالب فقط به‌عنوان مرجع تاریخی نگه داشته شدند و داده گزارش نیستند."
         )
 
         _save_atomic(document, output)
@@ -237,9 +257,7 @@ class DocxReportWriter:
             output_path=output,
             mode="template",
             sections_written=tuple(sections),
-            tables_written=sum(
-                1 for table in content.tables if _normalize(table.title) not in existing
-            ),
+            tables_written=len(content.tables),
             placeholders_resolved=tuple(
                 sorted(
                     key
@@ -261,8 +279,8 @@ class DocxReportWriter:
         section.page_height = Cm(29.7)
         section.top_margin = Cm(2.5)
         section.bottom_margin = Cm(2.5)
-        section.left_margin = Cm(3)
-        section.right_margin = Cm(2)
+        section.left_margin = Cm(2)
+        section.right_margin = Cm(3)
         section.header_distance = Cm(1.2)
         section.footer_distance = Cm(1.2)
         section.different_first_page_header_footer = True
@@ -352,6 +370,13 @@ class DocxReportWriter:
             bullet.font.rtl = True
             _style_complex_font(bullet, FONT_NAME, BODY_PT)
 
+    def _style_paragraph(self, paragraph: Any, **formatting: Any) -> Any:
+        if self._template_mode:
+            formatting.update(
+                font_name=None, size_pt=None, bold=None, color=None
+            )
+        return format_paragraph(paragraph, **formatting)
+
     def _write_header_footer(self, section: Any, content: ReportContent) -> None:
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         from docx.shared import Pt, RGBColor
@@ -435,42 +460,57 @@ class DocxReportWriter:
         content: ReportContent,
         *,
         existing: set[str],
+        existing_tables: dict[tuple[str, ...], Any],
     ) -> list[str]:
         from docx.enum.text import WD_ALIGN_PARAGRAPH
 
         written: list[str] = []
         first_heading = True
+        used_template_tables: set[int] = set()
+
+        def add_section_heading(name: str, level: int, *, page_break: bool = True) -> None:
+            nonlocal first_heading
+            written.append(name)
+            if _normalize(name) in existing:
+                first_heading = False
+                return
+            heading = self._heading(builder, name, level)
+            heading.paragraph_format.page_break_before = page_break and not first_heading
+            first_heading = False
 
         if content.executive_summary:
-            if _normalize("خلاصه اجرایی") in existing:
-                self._skipped_template_sections.append("خلاصه اجرایی")
-            else:
-                heading = self._heading(builder, "خلاصه اجرایی", 1)
-                heading.paragraph_format.page_break_before = not first_heading
-                first_heading = False
-                written.append("خلاصه اجرایی")
-                for text in content.executive_summary:
-                    paragraph = builder.paragraph(text)
-                    format_paragraph(
-                        paragraph,
-                        alignment=WD_ALIGN_PARAGRAPH.JUSTIFY,
-                        size_pt=BODY_PT,
-                        space_after_pt=6,
-                        line_spacing=1.5,
-                    )
+            add_section_heading("خلاصه اجرایی", 1)
+            for text in content.executive_summary:
+                paragraph = builder.paragraph(text)
+                self._style_paragraph(
+                    paragraph,
+                    alignment=WD_ALIGN_PARAGRAPH.JUSTIFY,
+                    size_pt=BODY_PT,
+                    space_after_pt=6,
+                    line_spacing=1.5,
+                )
 
         for table in content.tables:
-            if _normalize(table.title) in existing:
+            table_key = tuple(_normalize(header) for header in table.headers)
+            template_table = existing_tables.get(table_key)
+            if template_table is not None and id(template_table) not in used_template_tables:
+                used_template_tables.add(id(template_table))
+                self._fill_template_table(template_table, table)
                 self._skipped_template_sections.append(table.title)
+                notes = [
+                    note
+                    for note in (table.source_note, table.statistical_note)
+                    if note
+                ]
+                if notes:
+                    self._write_notes_after_table(builder.document, template_table, notes)
                 continue
-            heading = self._heading(builder, table.title, 2)
-            heading.paragraph_format.page_break_before = False
-            written.append(table.title)
+            add_section_heading(table.title, 2, page_break=False)
             caption = builder.paragraph(
                 table.caption or f"جدول {table.title}",
                 style=_style_name(builder.document, "Caption"),
             )
-            format_paragraph(
+            self._style_paragraph(
                 caption,
                 alignment=WD_ALIGN_PARAGRAPH.CENTER,
                 size_pt=9.5,
@@ -492,64 +532,65 @@ class DocxReportWriter:
         ]
         warning_lines = [str(item) for item in content.warnings] + issues
         if warning_lines:
-            if _normalize("هشدارها و موارد نیازمند بررسی") in existing:
-                self._skipped_template_sections.append("هشدارها و موارد نیازمند بررسی")
-            else:
-                heading = self._heading(builder, "هشدارها و موارد نیازمند بررسی", 1)
-                heading.paragraph_format.page_break_before = not first_heading
-                first_heading = False
-                written.append("هشدارها و موارد نیازمند بررسی")
-                for text in warning_lines:
-                    self._write_bullet(builder, text)
+            add_section_heading("هشدارها و موارد نیازمند بررسی", 1)
+            for text in warning_lines:
+                self._write_bullet(builder, text)
 
         if content.conclusions or content.recommendations:
-            if _normalize("نتیجه‌گیری و پیشنهادها") in existing:
-                self._skipped_template_sections.append("نتیجه‌گیری و پیشنهادها")
-            else:
-                heading = self._heading(builder, "نتیجه‌گیری و پیشنهادها", 1)
-                heading.paragraph_format.page_break_before = not first_heading
-                first_heading = False
-                written.append("نتیجه‌گیری و پیشنهادها")
-                if content.conclusions:
-                    self._heading(builder, "نتیجه‌گیری", 2)
-                    for text in content.conclusions:
-                        self._write_bullet(builder, text)
-                if content.recommendations:
-                    self._heading(builder, "پیشنهادها", 2)
-                    for text in content.recommendations:
-                        self._write_bullet(builder, text)
+            add_section_heading("نتیجه‌گیری و پیشنهادها", 1)
+            if content.conclusions:
+                add_section_heading("نتیجه‌گیری", 2, page_break=False)
+                for text in content.conclusions:
+                    self._write_bullet(builder, text)
+            if content.recommendations:
+                add_section_heading("پیشنهادها", 2, page_break=False)
+                for text in content.recommendations:
+                    self._write_bullet(builder, text)
 
         if content.source_notes:
-            if _normalize("یادداشت‌های منبع") in existing:
-                self._skipped_template_sections.append("یادداشت‌های منبع")
-            else:
-                heading = self._heading(builder, "یادداشت‌های منبع", 1)
-                heading.paragraph_format.page_break_before = not first_heading
-                first_heading = False
-                written.append("یادداشت‌های منبع")
-                for text in content.source_notes:
-                    self._write_bullet(builder, text)
+            add_section_heading("یادداشت‌های منبع", 1)
+            for text in content.source_notes:
+                self._write_bullet(builder, text)
 
         if content.statistical_notes:
-            if _normalize("یادداشت‌های آماری") in existing:
-                self._skipped_template_sections.append("یادداشت‌های آماری")
-            else:
-                heading = self._heading(builder, "یادداشت‌های آماری", 1)
-                heading.paragraph_format.page_break_before = not first_heading
-                first_heading = False
-                written.append("یادداشت‌های آماری")
-                for text in content.statistical_notes:
-                    self._write_bullet(builder, text)
+            add_section_heading("یادداشت‌های آماری", 1)
+            for text in content.statistical_notes:
+                self._write_bullet(builder, text)
 
         return written
 
     def _heading(self, builder: "_BodyWriter", text: str, level: int) -> Any:
         heading = builder.heading(text, level)
-        ensure_paragraph_bidi(heading)
         size = {1: 16.0, 2: 14.0, 3: 12.5}.get(level)
-        for run in heading.runs:
-            set_run_rtl(run, font_name=FONT_NAME, size_pt=size, bold=True)
+        self._style_paragraph(heading, size_pt=size, bold=True)
         return heading
+
+    def _fill_template_table(self, table: Any, content_table: ReportTable) -> None:
+        """Reuse a matching template table and replace its data rows."""
+
+        for row in list(table.rows[1:]):
+            table._tbl.remove(row._tr)
+        for values in content_table.rows:
+            row = table.add_row()
+            for column, value in enumerate(values[: len(table.columns)]):
+                row.cells[column].text = str(value)
+        set_table_rtl(table, shade_header=False, bold_header=False)
+        for row in table.rows:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    self._style_paragraph(paragraph)
+
+    def _write_notes_after_table(
+        self, document: Any, table: Any, notes: list[str]
+    ) -> None:
+        anchor = table._tbl
+        for text in notes:
+            paragraph = document.add_paragraph(
+                text, style=_style_name(document, "Caption")
+            )
+            anchor.addnext(paragraph._p)
+            anchor = paragraph._p
+            self._style_paragraph(paragraph)
 
     def _write_table(self, builder: "_BodyWriter", table: ReportTable) -> None:
         from docx.enum.table import WD_TABLE_ALIGNMENT
@@ -561,7 +602,9 @@ class DocxReportWriter:
         doc_table.autofit = True
         _set_table_width_percent(doc_table, 100)
 
-        style_name = _style_name(builder.document, "Table Grid")
+        style_name = self._template_table_style or _style_name(
+            builder.document, "Table Grid"
+        )
         if style_name:
             try:
                 doc_table.style = style_name
@@ -579,7 +622,7 @@ class DocxReportWriter:
         for row in doc_table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
-                    format_paragraph(
+                    self._style_paragraph(
                         paragraph,
                         size_pt=10,
                         space_before_pt=1,
@@ -592,7 +635,7 @@ class DocxReportWriter:
         from docx.shared import RGBColor
 
         paragraph = builder.paragraph(text, style=_style_name(builder.document, "Caption"))
-        format_paragraph(
+        self._style_paragraph(
             paragraph,
             alignment=WD_ALIGN_PARAGRAPH.RIGHT,
             size_pt=9,
@@ -608,7 +651,7 @@ class DocxReportWriter:
 
         style_name = _style_name(builder.document, "List Bullet")
         paragraph = builder.paragraph(text, style=style_name)
-        format_paragraph(
+        self._style_paragraph(
             paragraph,
             alignment=WD_ALIGN_PARAGRAPH.JUSTIFY,
             size_pt=BODY_PT,
@@ -634,27 +677,64 @@ class DocxReportWriter:
             if contains_persian(paragraph.text):
                 ensure_paragraph_bidi(paragraph)
                 for run in paragraph.runs:
-                    set_run_rtl(run, font_name=FONT_NAME)
+                    set_run_rtl(run)
         tables = list(document.tables)
         for container in iter_header_footer_containers(document):
             tables.extend(container.tables)
         for table in tables:
             if any(contains_persian(cell.text) for row in table.rows for cell in row.cells):
-                set_table_rtl(table, shade_header=False)
+                set_table_rtl(table, shade_header=False, bold_header=False)
+
+    def _ensure_template_header(self, document: Any, content: ReportContent) -> None:
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import RGBColor
+
+        for section in document.sections:
+            for container in (
+                section.header,
+                section.first_page_header,
+                section.even_page_header,
+            ):
+                if _is_linked(container):
+                    continue
+                if any(paragraph.text.strip() for paragraph in container.paragraphs):
+                    return
+                if any(table.rows for table in container.tables):
+                    return
+        header = document.sections[0].header
+        header.is_linked_to_previous = False
+        paragraph = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
+        paragraph.text = ""
+        run = paragraph.add_run(content.title)
+        set_run_rtl(
+            run,
+            font_name=FONT_NAME,
+            size_pt=9.5,
+            color=RGBColor.from_string(MUTED_COLOR),
+        )
+        format_paragraph(
+            paragraph,
+            alignment=WD_ALIGN_PARAGRAPH.RIGHT,
+            space_after_pt=0,
+            line_spacing=1.0,
+        )
+        _add_bottom_border(paragraph, color="BFBFBF", size=4)
 
     def _ensure_template_page_numbers(self, document: Any, content: ReportContent) -> None:
-        if _has_page_field(document):
-            return
-        for section in document.sections:
+        for index, section in enumerate(document.sections):
             footer = section.footer
+            if _is_linked(footer) and index > 0:
+                continue
             footer.is_linked_to_previous = False
+            if _container_has_page_field(footer):
+                continue
             paragraph = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+            ensure_paragraph_bidi(paragraph)
             if paragraph.text.strip():
                 paragraph.add_run("  |  ")
             date_run = paragraph.add_run(f"{content.generated_at}  |  ")
             set_run_rtl(date_run, font_name=FONT_NAME, size_pt=9)
             add_page_number_field(paragraph, font_name=FONT_NAME, size_pt=9)
-            break
 
 
 class _BodyWriter:
@@ -721,6 +801,24 @@ def _style(styles: Any, name: str) -> Any:
 
 def _style_name(document: Any, name: str) -> str | None:
     return name if _style(document.styles, name) is not None else None
+
+
+def _preferred_table_style(document: Any) -> str | None:
+    from collections import Counter
+
+    styles: Counter[str] = Counter()
+    for table in document.tables:
+        if len(table.rows) < 2:
+            continue
+        try:
+            style = table.style
+        except (KeyError, ValueError):
+            continue
+        if style is not None and style.name != "Normal Table":
+            styles[style.name] += 1
+    if not styles:
+        return None
+    return styles.most_common(1)[0][0]
 
 
 def _style_complex_font(style: Any, name: str, size_pt: float) -> None:
@@ -816,59 +914,61 @@ def _strip_static_figures(document: Any) -> list[str]:
     for container in iter_header_footer_containers(document):
         for paragraph in container.paragraphs:
             removed.extend(_strip_paragraph(paragraph))
-    return removed
+        for table in container.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        removed.extend(_strip_paragraph(paragraph))
+    return list(dict.fromkeys(removed))
+
+
+def _run_has_field(run: Any) -> bool:
+    return any(
+        element.tag in {qn("w:fldChar"), qn("w:instrText")}
+        for element in run._r.iter()
+    )
 
 
 def _strip_paragraph(paragraph: Any) -> list[str]:
-    if paragraph_has_field(paragraph):
-        return []
-    text = paragraph.text
-    if not text or not _STATIC_FIGURE.search(PLACEHOLDER_PATTERN.sub(" ", text)):
-        return []
+    """Remove static figures run by run so template formatting is preserved."""
+
     removed: list[str] = []
-    pieces: list[str] = []
-    cursor = 0
+    for run in paragraph.runs:
+        if _run_has_field(run):
+            continue
+        text = run.text
+        if not text or not _STATIC_FIGURE.search(PLACEHOLDER_PATTERN.sub(" ", text)):
+            continue
+        pieces: list[str] = []
+        cursor = 0
 
-    def _replace(match: re.Match[str]) -> str:
-        removed.append(match.group(0))
-        return ""
+        def _replace(match: re.Match[str]) -> str:
+            removed.append(match.group(0))
+            return ""
 
-    for placeholder in PLACEHOLDER_PATTERN.finditer(text):
-        pieces.append(_STATIC_FIGURE.sub(_replace, text[cursor : placeholder.start()]))
-        pieces.append(placeholder.group(0))
-        cursor = placeholder.end()
-    pieces.append(_STATIC_FIGURE.sub(_replace, text[cursor:]))
-    new_text = "".join(pieces)
-    new_text = re.sub(r"[ \t]{2,}", " ", new_text).strip()
-    if new_text == text:
-        return []
-    if paragraph.runs and all(_run_is_text_only(run) for run in paragraph.runs):
-        paragraph.runs[0].text = new_text
-        for run in paragraph.runs[1:]:
-            run.text = ""
+        for placeholder in PLACEHOLDER_PATTERN.finditer(text):
+            pieces.append(_STATIC_FIGURE.sub(_replace, text[cursor : placeholder.start()]))
+            pieces.append(placeholder.group(0))
+            cursor = placeholder.end()
+        pieces.append(_STATIC_FIGURE.sub(_replace, text[cursor:]))
+        new_text = re.sub(r"[ \t]{2,}", " ", "".join(pieces))
+        if new_text != text:
+            run.text = new_text
     return removed
 
 
-def _run_is_text_only(run: Any) -> bool:
-    allowed = {qn("w:rPr"), qn("w:t")}
-    return all(child.tag in allowed for child in run._r)
+def _contains_page_instruction(text: str) -> bool:
+    instruction = " ".join((text or "").split()).upper()
+    return instruction == "PAGE" or instruction.startswith("PAGE ")
 
 
-def _has_page_field(document: Any) -> bool:
-    for section in document.sections:
-        for container in (
-            section.header,
-            section.first_page_header,
-            section.even_page_header,
-            section.footer,
-            section.first_page_footer,
-            section.even_page_footer,
-        ):
-            if _is_linked(container):
-                continue
-            for element in container._element.iter(qn("w:instrText")):
-                if "PAGE" in (element.text or "").upper():
-                    return True
+def _container_has_page_field(container: Any) -> bool:
+    for element in container._element.iter(qn("w:instrText")):
+        if _contains_page_instruction(element.text or ""):
+            return True
+    for element in container._element.iter(qn("w:fldSimple")):
+        if _contains_page_instruction(element.get(qn("w:instr")) or ""):
+            return True
     return False
 
 
@@ -893,9 +993,16 @@ def _save_atomic(document: Any, output: Path) -> None:
     import os
     import zipfile
 
-    output.parent.mkdir(parents=True, exist_ok=True)
     temp = output.with_name(f".{output.stem}.{uuid4().hex}.tmp{output.suffix}")
+
+    def _cleanup() -> None:
+        try:
+            temp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     try:
+        output.parent.mkdir(parents=True, exist_ok=True)
         document.save(str(temp))
         if not zipfile.is_zipfile(temp):
             raise ReportFormatError("خروجی Word معتبر ساخته نشد (فایل ZIP نیست).")
@@ -905,6 +1012,14 @@ def _save_atomic(document: Any, output: Path) -> None:
                     "خروجی Word معتبر ساخته نشد (word/document.xml ندارد)."
                 )
         os.replace(temp, output)
+    except ReportFormatError:
+        _cleanup()
+        raise
+    except OSError as exc:
+        _cleanup()
+        raise ReportFormatError(
+            f"مسیر خروجی Word قابل نوشتن نیست: {output} ({exc})"
+        ) from exc
     except Exception:
-        temp.unlink(missing_ok=True)
+        _cleanup()
         raise

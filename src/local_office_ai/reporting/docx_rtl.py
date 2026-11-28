@@ -88,19 +88,27 @@ def ensure_paragraph_bidi(paragraph: Any) -> None:
 def set_run_rtl(
     run: Any,
     *,
-    font_name: str = "B Nazanin",
+    font_name: str | None = None,
     size_pt: float | None = None,
     bold: bool | None = None,
     color: Any = None,
 ) -> None:
-    """Mark a run as RTL and give it a complex-script font and size."""
+    """Mark a run as RTL, preserving an existing font when none is supplied."""
 
     run.font.rtl = True
     r_pr = run._r.get_or_add_rPr()
-    r_fonts = r_pr.get_or_add_rFonts()
-    r_fonts.set(qn("w:cs"), font_name)
-    r_fonts.set(qn("w:ascii"), font_name)
-    r_fonts.set(qn("w:hAnsi"), font_name)
+    r_fonts = r_pr.find(qn("w:rFonts"))
+    if font_name is not None:
+        if r_fonts is None:
+            r_fonts = r_pr.get_or_add_rFonts()
+        r_fonts.set(qn("w:cs"), font_name)
+        r_fonts.set(qn("w:ascii"), font_name)
+        r_fonts.set(qn("w:hAnsi"), font_name)
+    elif r_fonts is not None and r_fonts.get(qn("w:cs")) is None:
+        inherited = r_fonts.get(qn("w:ascii")) or r_fonts.get(qn("w:hAnsi"))
+        if inherited:
+            r_fonts.set(qn("w:cs"), inherited)
+    _ensure_bidi_language(r_pr)
     if size_pt is not None:
         from docx.shared import Pt
 
@@ -122,7 +130,7 @@ def format_paragraph(
     paragraph: Any,
     *,
     alignment: Any = None,
-    font_name: str = "B Nazanin",
+    font_name: str | None = "B Nazanin",
     size_pt: float | None = None,
     bold: bool | None = None,
     color: Any = None,
@@ -164,7 +172,13 @@ def set_section_rtl(section: Any) -> None:
         sect_pr.insert_element_before(oxml("w:rtlGutter"), "w:docGrid", "w:printerSettings", "w:sectPrChange")
 
 
-def set_table_rtl(table: Any, *, header_rows: int = 1, shade_header: bool = True) -> None:
+def set_table_rtl(
+    table: Any,
+    *,
+    header_rows: int = 1,
+    shade_header: bool = True,
+    bold_header: bool = True,
+) -> None:
     """Make a table read right to left and style its header row."""
 
     tbl_pr = table._tbl.tblPr
@@ -188,7 +202,28 @@ def set_table_rtl(table: Any, *, header_rows: int = 1, shade_header: bool = True
             for paragraph in cell.paragraphs:
                 ensure_paragraph_bidi(paragraph)
                 for run in paragraph.runs:
-                    set_run_rtl(run, bold=(True if index < header_rows else None))
+                    set_run_rtl(
+                        run,
+                        bold=(
+                            True
+                            if index < header_rows and bold_header
+                            else None
+                        ),
+                    )
+
+
+def _ensure_bidi_language(r_pr: Any) -> None:
+    lang = r_pr.find(qn("w:lang"))
+    if lang is None:
+        lang = oxml("w:lang")
+        r_pr.insert_element_before(
+            lang,
+            "w:eastAsianLayout",
+            "w:specVanish",
+            "w:oMath",
+            "w:rPrChange",
+        )
+    lang.set(qn("w:bidi"), "fa-IR")
 
 
 def _shade_cell(cell: Any, fill: str) -> None:

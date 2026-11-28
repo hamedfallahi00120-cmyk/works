@@ -409,15 +409,17 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
   template's sections, margins, styles, headings, tables, numbering and RTL settings,
   replaces placeholders, strips static historical figures unless
   `strip_static_figures=False`, inserts the body at `{{content}}`/`{{body}}`/`[[CONTENT]]`
-  or appends it, and skips sections the template already contains to avoid duplication.
-  Every generated file is reopened and validated before it is returned; an invalid file
-  is never delivered.
+  or appends it, adds generated content under a heading the template already contains
+  instead of skipping the section, and fills a table whose header row matches a template
+  table instead of duplicating it. Every generated file is reopened and validated before
+  it is returned; an invalid file is never delivered.
 - `reporting/docx_validation.py` — `validate_docx_output`/`ensure_valid_docx`: confirms
-  the DOCX ZIP members, parses `word/document.xml` as XML, reopens with python-docx,
-  checks expected sections/tables, RTL sections/runs/tables, header/footer, PAGE field,
-  unresolved placeholders and that every numeric claim is in `ReportContent.approved_numbers`.
-  Word field numbers are excluded, benign address/date numbers are optional, and a
-  preserved template figure can be allowed explicitly.
+  the DOCX ZIP members, parses every XML part, reopens with python-docx, checks required
+  headings, the required table header rows and count, RTL sections/runs/tables, header/footer, a
+  real PAGE field, unresolved placeholders and that every numeric claim outside Word
+  fields is in `ReportContent.approved_numbers()`. Word field numbers are excluded, benign
+  template numbering is optional, and a preserved template figure can be allowed
+  explicitly.
 - `reporting/specification.py` — `ReportContent.from_analysis` now also emits metric,
   descriptive-statistics, request-answer, quality and reconciliation tables plus identity,
   issue and answer values, all with source addresses. `placeholder_values()` and
@@ -431,23 +433,27 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
 - `app/workflow.py` / `coordinator.py` / `ui/cli.py` — `--keep-template-figures` keeps
   template figures only when explicitly requested; a Word request without a template now
   builds a standalone report instead of failing.
-- `tests/test_docx_report_writer.py` (20 tests) uses real openpyxl workbooks and real
-  python-docx templates: valid DOCX packages, Persian paragraph RTL (bidi/rtl/cs/szCs),
-  RTL tables with repeated shaded headers, template margins/styles/headings/tables/header/
-  footer preservation, placeholder replacement, historical-figure removal and explicit
-  preservation, no-anchor append, duplicate-section avoidance, numeric grounding (including
-  tampered output and ungrounded Qwen text), manual table/header validation, missing
+- `tests/test_docx_report_writer.py` (25 tests) uses real openpyxl workbooks and real
+  python-docx templates: valid DOCX packages, Persian paragraph RTL (bidi/rtl/cs/szCs and
+  `w:lang/@w:bidi`), RTL tables with repeated shaded headers, template margins/styles/
+  headings/tables/header/footer preservation, placeholder replacement, historical-figure
+  removal and explicit preservation (including formatted runs), no-anchor append,
+  generated content under an existing heading, reuse of a matching template table,
+  numeric grounding (including tampered output and ungrounded Qwen text), manual table/
+  header validation, missing
   templates, invalid output paths (wrong suffix, PDF, output=template, directory, nested
   creation), reopen/validate, generation-result serialization and CLI end-to-end Word runs
   with and without a template; an anchor with surrounding template text keeps that text.
 - Known limits: the writer targets Word's built-in styles and a small explicit typography
   set; it does not embed custom fonts (the Windows target must have B Nazanin or Word
   substitutes it). Template placeholders inside hyperlinks, text boxes, footnotes and
-  comments remain outside the replacement pass (Prompt 04A limit). A template with an
-  existing section title is treated as already authored and that section is skipped, with
-  a warning, rather than merged into the template's prose. Folder and multi-source reports
-  remain XLSX-only. PDF is recognised but not generated. The Windows rendering itself
-  cannot be verified on Linux; tests assert the OOXML properties Word reads.
+  comments remain outside the replacement pass (Prompt 04A limit). An existing template
+  heading is not written twice: generated content is added under it, while a matching
+  template table is filled by replacing its data rows. The match is exact on normalized
+  header cells, so a template table with different headers receives a new table instead;
+  a table whose header row had merged cells may not be reused. Folder and multi-source
+  reports remain XLSX-only. PDF is recognised but not generated. The Windows rendering
+  itself cannot be verified on Linux; tests assert the OOXML properties Word reads.
 
 ### Instructions for the next AI agent
 

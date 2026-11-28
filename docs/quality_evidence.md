@@ -313,7 +313,7 @@ requirements files before this run.
 
 ```text
 python -m pytest tests/test_semantic_quality.py -o addopts="" -q
--> 23 passed in 1.35s (exit 0)
+-> 23 passed in 1.34s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
 -> 223 passed, 2 skipped, 36 deselected, 1 xfailed in 25.58s (exit 0)
@@ -743,21 +743,23 @@ Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
 
 ```text
 python -m pytest tests/test_docx_report_writer.py -o addopts="" -q
--> 20 passed in 7.20s (exit 0)
+-> 25 passed in 9.07s (exit 0)
 
 python -m pytest tests/test_report_output_formats.py -o addopts="" -q
--> 23 passed in 1.36s (exit 0)
+-> 23 passed in 1.34s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 340 passed, 6 skipped, 36 deselected in 46.02s (exit 0)
+-> 345 passed, 6 skipped, 36 deselected in 48.55s (exit 0)
 ```
 
 `tests/test_docx_report_writer.py` uses real openpyxl workbooks and real python-docx
 templates. It covers: valid DOCX generation; Persian paragraph RTL (`w:bidi`, `w:rtl`,
-`w:cs`, `w:szCs`); RTL tables with repeated shaded headers; template margins, styles,
-headings, tables, header/footer preservation; placeholder replacement; historical-figure
-removal and explicit preservation; template body insertion with and without an anchor;
-avoiding duplicated template sections; numeric consistency (including a tampered DOCX
+`w:cs`, `w:szCs`, `w:lang/@w:bidi`); RTL tables with repeated shaded headers; template
+margins, styles, headings, tables, header/footer preservation; placeholder replacement;
+historical-figure removal and explicit preservation, including formatted runs; template
+body insertion with and without an anchor; generated content under an existing heading
+without duplicating it; filling a matching template table instead of duplicating it;
+every XML part parsed and required table headers checked; numeric consistency (including a tampered DOCX
 and an ungrounded Qwen narrative); manual table/header validation; missing templates;
 invalid output paths (wrong suffix, PDF, output equals template, directory, nested path
 creation); reopening and structural validation; generation-result serialization; and
@@ -770,5 +772,6 @@ CLI end-to-end Word runs with and without a template.
 - The writer targets Word built-in styles and a small explicit typography set; it does
   not embed fonts. The Windows target must provide B Nazanin or Word substitutes it.
 - Template placeholders inside hyperlinks, text boxes, footnotes and comments are outside
-  the replacement pass (Prompt 04A limit).
+  the replacement pass (Prompt 04A limit). A matching template table is reused only when
+  its normalized header row is identical; otherwise a new table is added.
 - Folder and multi-source reports remain XLSX-only. PDF is recognised but not generated.

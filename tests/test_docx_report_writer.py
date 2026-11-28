@@ -168,6 +168,7 @@ def test_persian_paragraphs_carry_real_rtl_properties(report_content, tmp_path):
             r_fonts = r_pr.find(qn("w:rFonts"))
             assert r_fonts is not None and r_fonts.get(qn("w:cs"))
             assert r_pr.find(qn("w:szCs")) is not None
+            assert r_pr.find(qn("w:lang")).get(qn("w:bidi")) == "fa-IR"
 
     assert result.validation.sections_with_rtl >= 1
     assert result.validation.rtl_runs > 0
@@ -195,6 +196,7 @@ def test_tables_are_right_to_left_with_repeated_headers(report_content, tmp_path
                 assert paragraph._p.pPr.find(qn("w:bidi")) is not None
                 for run in paragraph.runs:
                     assert run._r.rPr.find(qn("w:rtl")) is not None
+                    assert run._r.rPr.find(qn("w:lang")).get(qn("w:bidi")) == "fa-IR"
     assert result.validation.rtl_tables == len(document.tables)
 
 
@@ -234,6 +236,73 @@ def test_template_layout_styles_and_content_are_preserved(report_content, rtl_te
     )
     assert table.cell(0, 1).text == "مقدار"
     assert "2,500,000" in _all_text(document)
+
+
+def test_template_run_formatting_is_not_rewritten(report_content, tmp_path):
+    _, content = report_content
+    template = tmp_path / "format-preserving.docx"
+    document = Document()
+    paragraph = document.add_paragraph()
+    run = paragraph.add_run("متن قالب با قلم اختصاصی")
+    run.font.name = "Vazirmatn"
+    run.font.size = Pt(11)
+    run.bold = False
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "سرستون"
+    table.cell(0, 1).text = "مقدار"
+    header_run = table.cell(0, 0).paragraphs[0].runs[0]
+    header_run.font.name = "Tahoma"
+    header_run.bold = False
+    document.add_paragraph("{{content}}")
+    document.save(template)
+
+    output = tmp_path / "format-preserving-out.docx"
+    result = _build(content, output, template_path=template)
+
+    assert result.validation.valid is True
+    reopened = Document(str(output))
+    styled = next(
+        item for item in reopened.paragraphs if item.text == "متن قالب با قلم اختصاصی"
+    )
+    styled_run = styled.runs[0]
+    assert styled_run.font.name == "Vazirmatn"
+    assert styled_run.font.size == Pt(11)
+    assert styled_run.bold is False
+
+    table = reopened.tables[0]
+    header_run = table.cell(0, 0).paragraphs[0].runs[0]
+    assert header_run.font.name == "Tahoma"
+    assert header_run.bold is False
+
+
+def test_formatted_static_figure_is_removed_without_collapsing_runs(
+    report_content, tmp_path
+):
+    _, content = report_content
+    template = tmp_path / "formatted-figure.docx"
+    document = Document()
+    paragraph = document.add_paragraph()
+    lead = paragraph.add_run("مبلغ تاریخی ")
+    lead.bold = True
+    figure = paragraph.add_run(HISTORICAL_FIGURE)
+    figure.italic = True
+    tail = paragraph.add_run(" تومان بود")
+    tail.underline = True
+    document.add_paragraph("{{content}}")
+    document.save(template)
+
+    output = tmp_path / "formatted-figure-out.docx"
+    result = _build(content, output, template_path=template)
+
+    assert HISTORICAL_FIGURE in result.removed_static_figures
+    reopened = Document(str(output))
+    paragraph = next(
+        item for item in reopened.paragraphs if "مبلغ تاریخی" in item.text
+    )
+    assert HISTORICAL_FIGURE not in paragraph.text
+    assert paragraph.runs[0].bold is True
+    assert paragraph.runs[1].italic is True
+    assert paragraph.runs[2].underline is True
 
 
 # --------------------------------------------------------------------------- #
@@ -350,6 +419,42 @@ def test_template_sections_are_not_duplicated(report_content, tmp_path):
         if paragraph.style.name == "Heading 1"
     ]
     assert headings.count("خلاصه اجرایی") == 1
+    assert any(
+        content.executive_summary[0] in paragraph.text
+        for paragraph in document.paragraphs
+    )
+    assert result.tables_written == len(content.tables)
+
+
+def test_matching_template_table_is_filled_instead_of_duplicated(
+    report_content, tmp_path
+):
+    _, content = report_content
+    template = tmp_path / "existing-table.docx"
+    document = Document()
+    document.add_heading("شناسنامه گزارش", level=1)
+    table = document.add_table(rows=2, cols=2)
+    table.style = "Table Grid"
+    table.cell(0, 0).text = "شرح"
+    table.cell(0, 1).text = "مقدار"
+    table.cell(1, 0).text = "مقدار قدیمی"
+    table.cell(1, 1).text = "۱۲۳"
+    document.add_paragraph("{{content}}")
+    document.save(template)
+
+    output = tmp_path / "existing-table-out.docx"
+    result = _build(content, output, template_path=template)
+
+    assert result.validation.valid is True
+    document = Document(str(output))
+    matching = [
+        item
+        for item in document.tables
+        if [cell.text for cell in item.rows[0].cells] == ["شرح", "مقدار"]
+    ]
+    assert len(matching) == 1
+    assert "مقدار قدیمی" not in _all_text(document)
+    assert any(cell.text == "فایل منبع" for cell in matching[0].columns[0].cells)
     assert result.tables_written == len(content.tables)
     assert any("جلوگیری از تکرار" in warning for warning in result.warnings)
 
@@ -418,6 +523,48 @@ def test_model_narrative_is_dropped_when_it_quotes_an_unapproved_number():
     assert any("روایت مدل" in warning for warning in content.warnings)
 
 
+def test_model_date_claim_is_dropped_even_when_its_parts_are_approved():
+    analysis = SimpleNamespace(
+        meta=SimpleNamespace(path="narrative.xlsx"),
+        primary_table=None,
+        integration=None,
+        calculations=[
+            SimpleNamespace(
+                name="year",
+                label="سال",
+                value=Decimal("1403"),
+                unit="",
+                sources=[],
+            ),
+            SimpleNamespace(
+                name="count",
+                label="تعداد",
+                value=Decimal("4"),
+                unit="",
+                sources=[],
+            ),
+        ],
+        generic=None,
+        request_answers=[],
+        quality=None,
+        statistical_reconciliation=None,
+        anomalies=[],
+        warnings=[],
+        ai={
+            "response": {
+                "summary": "دوره 1403/04 بررسی شد.",
+                "findings": [],
+                "recommendations": [],
+            }
+        },
+    )
+
+    content = ReportContent.from_analysis(analysis)
+
+    assert "1403/04" not in "\n".join(content.executive_summary)
+    assert any("روایت مدل" in warning for warning in content.warnings)
+
+
 def test_manual_content_tables_must_match_their_headers():
     content = ReportContent(
         title="گزارش",
@@ -473,6 +620,11 @@ def test_invalid_output_paths_are_rejected(report_content, rtl_template, tmp_pat
     with pytest.raises(ReportFormatError, match="پوشه"):
         _build(content, directory)
 
+    blocked_parent = tmp_path / "blocked"
+    blocked_parent.write_text("not a directory", encoding="utf-8")
+    with pytest.raises(ReportFormatError, match="قابل نوشتن"):
+        _build(content, blocked_parent / "report.docx")
+
     nested = tmp_path / "a" / "b" / "c" / "report.docx"
     result = _build(content, nested)
     assert nested.exists()
@@ -503,11 +655,42 @@ def test_generated_docx_is_reopened_and_structurally_validated(report_content, t
     assert validation.unresolved_placeholders == ()
     assert result.validation is not None and result.validation.valid is True
 
+    header_validation = validate_docx_output(
+        output, content, required_table_headers=[("شرح", "مقدار")]
+    )
+    assert header_validation.valid is True
+    missing_headers = validate_docx_output(
+        output, content, required_table_headers=[("ستون ناموجود", "مقدار")]
+    )
+    assert missing_headers.valid is False
+    assert any("سرستون" in error for error in missing_headers.errors)
+
     plain_text = tmp_path / "fake.docx"
     plain_text.write_text("this is not a Word file", encoding="utf-8")
     fake = validate_docx_output(plain_text)
     assert fake.valid is False
     assert any("ZIP" in error for error in fake.errors)
+
+
+def test_corrupt_header_xml_is_rejected(report_content, tmp_path):
+    _, content = report_content
+    output = tmp_path / "valid.docx"
+    _build(content, output)
+
+    corrupt = tmp_path / "corrupt-header.docx"
+    with zipfile.ZipFile(output) as source, zipfile.ZipFile(corrupt, "w") as target:
+        replaced = False
+        for item in source.infolist():
+            data = source.read(item.filename)
+            if item.filename.startswith("word/header") and item.filename.endswith(".xml"):
+                data = b"<w:hdr"
+                replaced = True
+            target.writestr(item, data)
+    assert replaced is True
+
+    validation = validate_docx_output(corrupt)
+    assert validation.valid is False
+    assert any("XML" in error for error in validation.errors)
 
 
 def test_generation_result_serializes_writer_and_validation(report_content, tmp_path):

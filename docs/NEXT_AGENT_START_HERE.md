@@ -34,11 +34,14 @@ Prompt 03A remains on its branch and PR #8.
   captions, source/statistical notes, warnings, conclusions and recommendations, with
   header/footer and page numbers. Template mode preserves layout/styles, replaces
   placeholders, removes static historical figures (unless explicitly preserved),
-  inserts the analytical body at `{{content}}`, and skips sections the template already
-  contains.
-- `reporting/docx_validation.py` — reopens the delivered file and verifies DOCX ZIP
-  members, XML, sections, tables, RTL, page numbering, placeholders and that every
-  number is approved by `ReportContent`. An invalid file is never delivered.
+  inserts the analytical body at `{{content}}` or appends it, adds generated content under
+  headings the template already contains, reuses a matching template table instead of
+  duplicating it, and skips only a table that is already represented.
+- `reporting/docx_validation.py` — reopens the delivered file and verifies every XML
+  part, required headings, the expected table headers/count, RTL sections/runs/tables, headers,
+  footers, real `PAGE` fields, unresolved placeholders and every numeric claim outside
+  Word fields against `ReportContent.approved_numbers()`. An invalid file is never
+  delivered.
 - `reporting/specification.py` — `ReportContent.from_analysis` now emits identity,
   metrics, descriptive statistics, request answers, quality and reconciliation tables,
   plus `placeholder_values()` and `approved_numbers()`. Model narrative is admitted only
@@ -54,13 +57,13 @@ Recorded sandbox evidence (Linux, CPython 3.13.15, pytest 9.2.0):
 
 ```text
 python -m pytest tests/test_docx_report_writer.py -o addopts="" -q
--> 20 passed in 7.20s
+-> 25 passed in 9.07s
 
 python -m pytest tests/test_report_output_formats.py -o addopts="" -q
--> 23 passed in 1.36s
+-> 23 passed in 1.34s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 340 passed, 6 skipped, 36 deselected in 46.02s
+-> 345 passed, 6 skipped, 36 deselected in 48.55s
 ```
 
 The 36 deselected tests are `requires_sample`; their private workbook is absent and they

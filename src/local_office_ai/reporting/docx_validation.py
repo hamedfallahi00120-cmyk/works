@@ -71,6 +71,7 @@ def validate_docx_output(
     content: Any = None,
     *,
     required_sections: Iterable[str] = (),
+    required_table_headers: Iterable[Iterable[str]] = (),
     minimum_tables: int = 0,
     require_rtl: bool = True,
     require_page_numbers: bool = True,
@@ -94,8 +95,12 @@ def validate_docx_output(
     try:
         with zipfile.ZipFile(target) as archive:
             names = set(archive.namelist())
-            document_xml = archive.read("word/document.xml") if "word/document.xml" in names else b""
-    except (OSError, zipfile.BadZipFile) as exc:
+            xml_parts = {
+                name: archive.read(name)
+                for name in names
+                if name.endswith(".xml")
+            }
+    except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
         validation.errors.append(f"بسته Word قابل خواندن نیست: {exc}")
         return validation
     missing = [member for member in REQUIRED_DOCX_MEMBERS if member not in names]
@@ -105,9 +110,14 @@ def validate_docx_output(
     try:
         from lxml import etree
 
-        etree.fromstring(document_xml)
-    except Exception as exc:  # noqa: BLE001 - lxml raises XMLSyntaxError and friends
-        validation.errors.append(f"XML سند Word معتبر نیست: {exc}")
+        for part_name, part_xml in xml_parts.items():
+            try:
+                etree.fromstring(part_xml)
+            except Exception as exc:  # noqa: BLE001 - lxml raises XMLSyntaxError
+                validation.errors.append(f"XML بخش «{part_name}» معتبر نیست: {exc}")
+    except ImportError as exc:  # pragma: no cover - lxml ships with python-docx
+        validation.errors.append(f"برای بازرسی XML کتابخانه lxml در دسترس نیست: {exc}")
+    if validation.errors:
         return validation
 
     try:
@@ -139,6 +149,19 @@ def validate_docx_output(
         validation.errors.append(
             f"تعداد جدول‌های سند ({validation.table_count}) کمتر از حد انتظار ({minimum_tables}) است."
         )
+    actual_headers = {
+        tuple(_normalize(cell.text) for cell in table.rows[0].cells)
+        for table in document.tables
+        if table.rows
+    }
+    for headers in required_table_headers:
+        expected = tuple(_normalize(str(header)) for header in headers)
+        if expected not in actual_headers:
+            validation.errors.append(
+                "جدول مورد انتظار با سرستون‌های «"
+                + " | ".join(str(header) for header in headers)
+                + "» در سند پیدا نشد."
+            )
 
     validation.sections_with_rtl = sum(
         1 for section in document.sections if section._sectPr.find(qn("w:bidi")) is not None
@@ -173,15 +196,13 @@ def validate_docx_output(
             )
             for paragraph in container.paragraphs:
                 bucket.append(paragraph.text)
-                if not _paragraph_has_field(paragraph):
-                    numeric_bucket.append(paragraph.text)
+                numeric_bucket.append(_numeric_text(paragraph))
             for table in container.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
                             bucket.append(paragraph.text)
-                            if not _paragraph_has_field(paragraph):
-                                numeric_bucket.append(paragraph.text)
+                            numeric_bucket.append(_numeric_text(paragraph))
     validation.has_header = any(text.strip() for text in header_texts)
     validation.has_footer = any(text.strip() for text in footer_texts)
     validation.has_page_number_field = _has_page_field(document)
@@ -255,6 +276,11 @@ def _count_tag(document: Any, tag: str) -> int:
     return sum(1 for _ in document.element.body.iter(qn(tag)))
 
 
+def _contains_page_instruction(text: str) -> bool:
+    instruction = " ".join((text or "").split()).upper()
+    return instruction == "PAGE" or instruction.startswith("PAGE ")
+
+
 def _has_page_field(document: Any) -> bool:
     for section in document.sections:
         for container in (
@@ -268,7 +294,10 @@ def _has_page_field(document: Any) -> bool:
             if _is_linked(container):
                 continue
             for element in container._element.iter(qn("w:instrText")):
-                if "PAGE" in (element.text or "").upper():
+                if _contains_page_instruction(element.text or ""):
+                    return True
+            for element in container._element.iter(qn("w:fldSimple")):
+                if _contains_page_instruction(element.get(qn("w:instr")) or ""):
                     return True
     return False
 
@@ -281,25 +310,40 @@ def _is_linked(container: Any) -> bool:
 
 
 def _numeric_safe_texts(document: Any) -> list[str]:
-    """Document text excluding Word field paragraphs (page numbers etc.)."""
+    """Document text excluding Word field spans (page numbers etc.)."""
 
-    texts: list[str] = []
-    for paragraph in document.paragraphs:
-        if _paragraph_has_field(paragraph):
-            continue
-        texts.append(paragraph.text)
+    texts = [_numeric_text(paragraph) for paragraph in document.paragraphs]
     for table in document.tables:
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
-                    if _paragraph_has_field(paragraph):
-                        continue
-                    texts.append(paragraph.text)
+                    texts.append(_numeric_text(paragraph))
     return texts
 
 
-def _paragraph_has_field(paragraph: Any) -> bool:
-    return any(element.tag == qn("w:fldChar") for element in paragraph._p.iter())
+def _numeric_text(paragraph: Any) -> str:
+    """Text outside Word fields, whose displayed results are not report data."""
+
+    texts: list[str] = []
+    field_depth = 0
+    for element in paragraph._p.iter():
+        if element.tag == qn("w:fldChar"):
+            kind = element.get(qn("w:fldCharType"))
+            if kind == "begin":
+                field_depth += 1
+            elif kind == "end":
+                field_depth = max(0, field_depth - 1)
+            continue
+        if element.tag == qn("w:instrText"):
+            continue
+        if element.tag not in {qn("w:t"), qn("w:tab"), qn("w:br"), qn("w:cr")}:
+            continue
+        if field_depth:
+            continue
+        if any(parent.tag == qn("w:fldSimple") for parent in element.iterancestors()):
+            continue
+        texts.append((element.text or "") if element.tag == qn("w:t") else " ")
+    return "".join(texts)
 
 
 def _normalize(text: str) -> str:
@@ -317,7 +361,7 @@ def _canonical(token: str) -> str | None:
 
 
 def _benign(canonical: str) -> bool:
-    """Small counts and years are template numbering, not report figures."""
+    """Small counts are template numbering, not report figures."""
 
     try:
         value = Decimal(canonical)
@@ -325,5 +369,5 @@ def _benign(canonical: str) -> bool:
         return False
     if value == value.to_integral_value():
         integer = int(value)
-        return 0 <= integer <= 100 or 1200 <= integer <= 2200
+        return 0 <= integer <= 100
     return False
