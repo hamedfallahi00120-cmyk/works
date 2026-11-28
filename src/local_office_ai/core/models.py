@@ -578,6 +578,11 @@ class AnalysisResult:
     integration: Any = None
     request_intent: Any = None
     request_answers: list[Any] = field(default_factory=list)
+    # Machine-readable provenance behind important figures, and the central
+    # quality-gate verdict over every stage.  Both are attached before the
+    # report writer runs so the writer can carry the evidence.
+    provenance: Any = None
+    quality_gate: Any = None
 
     def calculation(self, name: str) -> Calculation | None:
         for item in self.calculations:
@@ -660,6 +665,16 @@ class AnalysisResult:
                 if hasattr(self.integration, "to_dict")
                 else self.integration
             ),
+            "provenance": (
+                self.provenance.to_dict()
+                if hasattr(self.provenance, "to_dict")
+                else self.provenance
+            ),
+            "quality_gate": (
+                self.quality_gate.to_dict()
+                if hasattr(self.quality_gate, "to_dict")
+                else self.quality_gate
+            ),
         }
 
 
@@ -673,6 +688,7 @@ class RunResult:
     performance: dict[str, Any] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
     report: Any = None
+    quality_gate: Any = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -687,6 +703,11 @@ class RunResult:
                 self.report.to_dict()
                 if hasattr(self.report, "to_dict")
                 else self.report
+            ),
+            "quality_gate": (
+                self.quality_gate.to_dict()
+                if hasattr(self.quality_gate, "to_dict")
+                else self.quality_gate
             ),
         }
 

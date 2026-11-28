@@ -4,11 +4,13 @@ This ledger records the verified handoff state for the next engineering stage.
 The preparation baseline was Phase-1a preparation only. **Prompt 01A (Data Model, Workbook
 Structure, and Metadata Extraction) is implemented and merged to `main` as PR #4.**
 Prompt 01B (Multi-Block Extraction, Table Boundaries, and Total Detection) is merged as
-PR #5, Prompt 02A (Semantic Classification and Data Quality Validation) as PR #6 and
-Prompt 02B (Statistical Reconciliation and Calculation Integrity) as PR #7. **Prompt 03A
-(Semantic Source Matching and Period Alignment) is implemented on
-`feature/prompt-03a-semantic-source-matching`.** Evidence for each stage is recorded at
-the end of this file.
+PR #5, Prompt 02A (Semantic Classification and Data Quality Validation) as PR #6,
+Prompt 02B (Statistical Reconciliation and Calculation Integrity) as PR #7, Prompt 03B
+(Duplicate Detection, Derived Sheets, and Safe Aggregation) as PR #9, Prompt 04A (Output
+Format Routing and Word Template Architecture) as PR #10 and Prompt 04B (DOCX Report
+Writer and Persian RTL Rendering) as PR #11. **Prompt 05A (Quality Gate Architecture and
+Data Provenance) is implemented on `feature/prompt-05a-quality-gate-provenance`.**
+Evidence for each stage is recorded at the end of this file.
 
 ## Verified repository state
 
@@ -29,7 +31,9 @@ the end of this file.
 | Prompt 02B | Implemented and merged as PR #7 (evidence at end) |
 | Prompt 03A | Implemented on `feature/prompt-03a-semantic-source-matching`; PR #8 open (evidence at end) |
 | Prompt 03B | Implemented and merged as PR #9; `main` at `18fb3d4` (evidence at end) |
-| Prompt 04A | Implemented on `feature/prompt-04a-output-format-docx-template` (evidence at end) |
+| Prompt 04A | Implemented and merged as PR #10; `main` at `4741a98` (evidence at end) |
+| Prompt 04B | Implemented and merged as PR #11; `main` at `8f77c25` (evidence at end) |
+| Prompt 05A | Implemented on `feature/prompt-05a-quality-gate-provenance` (evidence at end) |
 | Production source fixes in the preparation baseline | None; Prompts 01A, 01B, 02A, 02B and 03A add production source changes (below) |
 
 ## Evidence labels
@@ -777,3 +781,100 @@ CLI end-to-end Word runs with and without a template.
   the replacement pass (Prompt 04A limit). A matching template table is reused only when
   its normalized header row is identical; otherwise a new table is added.
 - Folder and multi-source reports remain XLSX-only. PDF is recognised but not generated.
+
+---
+
+## Prompt 05A — quality gate architecture and data provenance
+
+Branch: `feature/prompt-05a-quality-gate-provenance`, created from `main` at `8f77c25`.
+`main` was not modified.
+
+### Implementation [SBX]
+
+- `src/local_office_ai/quality/models.py` (new): one status model for every stage —
+  `GateStatus.PASS`, `GateStatus.WARNING`, `GateStatus.FAIL`; `GateStage` with the
+  thirteen required stages; `GateFinding`; `GateStageResult`; and `QualityGateReport`.
+  A warning can never be reported as complete success (`is_complete_success == False`).
+  A blocking `FAIL` sets `blocked=True` and `can_claim_valid_report=False`. The report
+  exposes `missing_stages`, stage lookup, counts, Persian labels, serialization and the
+  provenance ledger.
+- `src/local_office_ai/quality/provenance.py` (new): builds a machine-readable
+  `ProvenanceLedger` from values Python already calculated. Records keep the source
+  filename, sheet, block, cell/range, original and normalized labels, original and
+  normalized values, period, unit, operation, formula/transformation, source cells
+  (with their raw values and formulas), related-record references and validation status.
+  Derived records must point to at least one source cell/range. Source records cover
+  declared totals, calculations, generic statistics, period totals, request answers and
+  reconciliation/comparison/average results. Loan-domain defaults do not become figures
+  of a non-loan workbook.
+- `src/local_office_ai/quality/gate.py` (new): `QualityGate.evaluate` evaluates source
+  availability, file readability, extraction completeness, block detection, period
+  identification, semantic classification, data quality, statistical validity, duplicate
+  and overlap detection, cross-source reconciliation, provenance completeness, output
+  format correctness and final document integrity. It reuses `DataQualityAnalyzer`,
+  `StatisticalReconciliation`, `DuplicateControlAnalyzer`, `AnalysisResult.extraction`,
+  `AnalysisResult.semantics` and `ProvenanceLedger`; there is no second validator.
+  `QualityGate.evaluate_folder` applies the same thirteen stages to multi-file reports and
+  merges the per-file provenance ledger.
+- `src/local_office_ai/core/models.py`: `AnalysisResult.provenance`,
+  `AnalysisResult.quality_gate`, `RunResult.quality_gate`; all serialize into the processed
+  JSON. `RunResult.status` is `failed` when the gate is blocked, `completed` only when the
+  gate is `PASS` and the input is unchanged, otherwise `completed_with_warnings`.
+- `src/local_office_ai/app/workflow.py`: provenance and the pre-delivery gate (stages 1–11)
+  are attached before the report writer reads the analysis; the final gate (stages 12–13)
+  is evaluated after generation and a blocking failure is recorded in `RunResult.errors`.
+- `src/local_office_ai/app/folder_workflow.py`: `FolderResult.quality_gate` is evaluated
+  after the folder workbook is written; multi-file status follows the same rule and an
+  unsafe cross-file total is refused rather than summed.
+- `src/local_office_ai/app/coordinator.py`: the console summary prints the gate status,
+  stage counts and whether a complete-success/valid-report claim is allowed.
+- `src/local_office_ai/excel/report_writer.py`: audit profile writes
+  «دروازه کیفیت» and «ردیابی منبع (شواهد)»; the clean profile never writes them, but its
+  «اعتبارسنجی داده» sheet carries a compact gate summary. `ReportContent` also carries
+  `quality_gate` and `provenance_summary` for the Word writer.
+- `tests/test_quality_gate.py` (9 tests) uses real openpyxl workbooks and a real folder
+  run. It covers complete provenance, missing cell references, derived values pointing to
+  source cells, failed extraction, statistical validation failure, warning propagation,
+  blocking behavior for critical failures, quality-status consistency, and merged
+  folder/cross-source evidence. `tests/test_workflow_generic.py` and
+  `tests/test_output_quality.py` were updated where a no-table/vague file and an unsafe
+  cross-file total now correctly report `completed_with_warnings` instead of complete
+  success.
+
+### Test evidence [SBX]
+
+Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
+
+```text
+python -m pytest tests/test_quality_gate.py -o addopts="" -q
+-> 9 passed in 2.11s (exit 0)
+
+python -m pytest tests -o addopts="" -q -m "not requires_sample"
+-> 358 passed, 2 skipped, 36 deselected in 51.76s (exit 0)
+```
+
+The 36 deselected tests are `requires_sample`; their private workbook is absent and they
+are not counted as passing. The 2 skips are optional GUI/monitoring tests whose system
+libraries are unavailable in this sandbox.
+
+### Behavior guarantees
+
+- One consistent model: every stage returns the same three statuses and the same evidence
+  shape. `QualityGateReport.status` is the worst stage status; blocking failures decide
+  whether a valid final report may be claimed.
+- A warning is not a complete success. A blocked report returns `RunResult.status= failed`
+  and records the blocking stages in `errors`; a warning-only or non-blocking `FAIL` run
+  returns `completed_with_warnings`.
+- Provenance is built only from validated analysis values and source cells. A derived
+  value without a source is a blocking provenance failure; a missing `sheet`, `cell` or
+  `sources` field is reported by name.
+- The gate never deletes, repairs or coerces a value. Quality findings and reconciliation
+  mismatches remain findings.
+
+### Not validated
+
+- The owner's Windows environment `F:\Local-Office-AI` (Python 3.14), its `venv`, and the
+  three original administrative files. No real-file acceptance is claimed.
+- Word rendering on Windows; DOCX integrity is checked on the OOXML package with
+  python-docx and XML parsing.
+- Ollama/Qwen narrative, ComfyUI, LibreHardwareMonitor, Tkinter and PySide6 runtime.

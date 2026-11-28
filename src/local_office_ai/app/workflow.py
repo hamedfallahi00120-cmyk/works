@@ -55,6 +55,11 @@ from local_office_ai.excel.validation import DataValidator
 from local_office_ai.excel.workbook_inspector import inspect_workbook
 from local_office_ai.monitoring.performance_report import build_performance_report
 from local_office_ai.monitoring.resource_monitor import ResourceMonitor
+from local_office_ai.quality import (
+    GateStatus,
+    QualityGate,
+    build_provenance_ledger,
+)
 from local_office_ai.reporting import (
     OutputFormat,
     ReportGenerator,
@@ -224,13 +229,47 @@ class ExcelIntelligenceWorkflow:
                 )
             output_path = Path(generation.output_path)
 
+            # ---------------------------------------------------------------- #
+            # The final gate adds output-format correctness and document
+            # integrity to the evidence already evaluated before delivery.
+            # ---------------------------------------------------------------- #
+            quality_gate = QualityGate().evaluate(
+                analysis,
+                source_path=source,
+                specification=specification,
+                generation=generation,
+                provenance=analysis.provenance,
+            )
+            analysis.quality_gate = quality_gate
+            if quality_gate.blocked:
+                blocking = "، ".join(item.stage.label_fa for item in quality_gate.blocking_failures)
+                message = (
+                    "دروازه کیفیت: گزارش نهایی معتبر نیست؛ "
+                    f"مراحل مسدودکننده: {blocking}."
+                )
+                errors.append(message)
+                analysis.warnings.append(message)
+            elif quality_gate.status is GateStatus.FAIL:
+                analysis.warnings.append(
+                    "دروازه کیفیت: تحلیل با «رد» تکمیل شد؛ گزارش کامل و بی‌قید نیست."
+                )
+            elif quality_gate.status is GateStatus.WARNING:
+                analysis.warnings.append(
+                    "دروازه کیفیت: تحلیل با هشدار تکمیل شد؛ موفقیت کامل گزارش نمی‌شود."
+                )
+
             input_unchanged = bundle.verify_unchanged()
             if not input_unchanged:
                 errors.append("هشدار: فایل ورودی پس از پردازش تغییر کرده است!")
                 analysis.warnings.append(errors[-1])
                 LOGGER.error("input file changed during processing: %s", source)
 
-            status = "completed" if not errors else "completed_with_warnings"
+            if quality_gate.blocked:
+                status = "failed"
+            elif quality_gate.status is GateStatus.PASS and not errors and input_unchanged:
+                status = "completed"
+            else:
+                status = "completed_with_warnings"
             self._write_sidecar(analysis, performance, output_path, source)
             self.progress(f"خروجی ساخته شد: {output_path}")
             return RunResult(
@@ -242,6 +281,7 @@ class ExcelIntelligenceWorkflow:
                 performance=performance.to_dict() if performance is not None else {},
                 errors=errors,
                 report=generation,
+                quality_gate=quality_gate,
             )
         finally:
             if self.monitor is not None:
@@ -517,6 +557,15 @@ class ExcelIntelligenceWorkflow:
                 )
 
         analysis.validation = DataValidator(self.settings).validate(analysis, grids)
+        # Provenance is built from the values Python already calculated, then the
+        # pre-delivery gate evaluates stages 1-11.  The final gate adds output
+        # format and document integrity after the writer has run.
+        analysis.provenance = build_provenance_ledger(analysis, source_path=bundle.path)
+        analysis.quality_gate = QualityGate().evaluate(
+            analysis,
+            source_path=bundle.path,
+            provenance=analysis.provenance,
+        )
         return analysis
 
     # ------------------------------------------------------------------ #
