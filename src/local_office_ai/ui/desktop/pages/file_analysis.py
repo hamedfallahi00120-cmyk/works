@@ -236,7 +236,16 @@ class FileAnalysisPage(Page):
         self.progress_card.finish()
         self.progress_card.setVisible(False)
         self.show_result(result)
-        self.composer.set_hint("تحلیل کامل شد؛ نتیجه در پایین صفحه است.", "success")
+        status = str(getattr(result, "status", ""))
+        if status == "failed":
+            self.composer.set_hint(
+                "تحلیل انجام شد اما دروازه کیفیت گزارش را معتبر نمی‌داند.",
+                "danger",
+            )
+        elif status == "completed":
+            self.composer.set_hint("تحلیل کامل شد؛ نتیجه در پایین صفحه است.", "success")
+        else:
+            self.composer.set_hint("تحلیل با هشدار کامل شد؛ هشدارها را بررسی کنید.", "warning")
 
     def finish_error(self, message: str) -> None:
         self.composer.set_running(False)

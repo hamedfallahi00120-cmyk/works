@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Iterable
+from typing import Any, ClassVar, Iterable
 
 
 class GateStatus(str, Enum):
@@ -251,7 +251,12 @@ class ProvenanceRecord:
     important: bool = True
     notes: list[str] = field(default_factory=list)
 
-    REQUIRED_FIELDS: tuple[str, ...] = ("filename", "sheet", "cell", "normalized_value")
+    REQUIRED_FIELDS: ClassVar[tuple[str, ...]] = (
+        "filename",
+        "sheet",
+        "cell",
+        "normalized_value",
+    )
 
     def missing(self, field_name: str) -> bool:
         value = getattr(self, field_name, "")

@@ -139,10 +139,15 @@ class FolderResultsView(Card):
         self._outcomes = files
         analyzed = sum(1 for item in files if getattr(item, "status", "") == "تحلیل شد")
         status = str(getattr(result, "status", ""))
-        self.status_badge.set_status(
-            "تکمیل شد" if status == "completed" else ("فایلی پیدا نشد" if status == "no_files" else "با هشدار"),
-            "success" if status == "completed" else ("warning" if status == "completed_with_warnings" else "danger"),
-        )
+        if status == "completed":
+            status_label, status_tone = "تکمیل شد", "success"
+        elif status == "failed":
+            status_label, status_tone = "ناموفق — گزارش معتبر نیست", "danger"
+        elif status == "no_files":
+            status_label, status_tone = "فایلی پیدا نشد", "danger"
+        else:
+            status_label, status_tone = "با هشدار", "warning"
+        self.status_badge.set_status(status_label, status_tone)
         self.title.setText(f"تحلیل منابع — {Path(str(getattr(result, 'folder', ''))).name or 'منابع انتخاب‌شده'}")
         self.path_label.setText(ltr(self._path) if self._path else "خروجی ساخته نشده است.")
         has_path = bool(self._path)

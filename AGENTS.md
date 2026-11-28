@@ -490,7 +490,9 @@ it does not aggregate, and Prompt 02B reconciliation rules still apply.
   warning or non-blocking failure. Do not present a warning as complete success.
 - `app/workflow.py`, `app/folder_workflow.py`, `app/coordinator.py` — attach the gate,
   record blocking failures in `errors`, and print the gate status, stage counts and the
-  valid-report/complete-success claim in the console summary.
+  valid-report/complete-success claim in the console summary. The desktop result page,
+  folder result page, banner and composer hint render a blocked/failed run as
+  «ناموفق — گزارش معتبر نیست», never as an ordinary warning or completed report.
 - `excel/report_writer.py`, `reporting/specification.py` — the audit profile writes
   «دروازه کیفیت» and «ردیابی منبع (شواهد)»; the clean profile never writes them and
   shows only a compact gate summary in «اعتبارسنجی داده». `ReportContent` carries the

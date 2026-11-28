@@ -51,6 +51,18 @@ def _count(items: Any) -> int:
         return 0
 
 
+def _format_code(value: Any) -> str:
+    return str(getattr(value, "value", value) or "").strip().lower()
+
+
+def _format_extension(value: Any) -> str:
+    extension = _text(getattr(value, "extension", ""))
+    if extension:
+        return extension
+    code = _format_code(value)
+    return f".{code}" if code in {"xlsx", "docx", "pdf"} else ""
+
+
 def _stage(
     stage: GateStage,
     status: GateStatus,
@@ -159,8 +171,20 @@ class QualityGate:
         for index, (_, sub_report) in enumerate(named_reports, start=1):
             if sub_report.provenance is None:
                 continue
+            key_map = {
+                record.key: f"{index}.{record.key}"
+                for record in sub_report.provenance.records
+            }
             for record in sub_report.provenance.records:
-                merged.records.append(replace(record, key=f"{index}.{record.key}"))
+                merged.records.append(
+                    replace(
+                        record,
+                        key=key_map[record.key],
+                        related_records=[
+                            key_map.get(item, item) for item in record.related_records
+                        ],
+                    )
+                )
 
         stages: list[GateStageResult] = []
         for stage in STAGE_ORDER[:-2]:
@@ -411,7 +435,14 @@ class QualityGate:
             )
         error_cells = int(getattr(meta, "total_error_cells", 0) or 0)
         warnings = list(getattr(analysis, "warnings", []) or [])
-        read_warnings = [item for item in warnings if "خواند" in item or "برگه" in item]
+        read_warnings = [
+            item
+            for item in warnings
+            if any(
+                marker in item
+                for marker in ("قفل موقت", "ماکرو", "پیوند خارجی", "خوانده می‌شوند")
+            )
+        ]
         checks: list[GateFinding] = []
         status = GateStatus.PASS
         if error_cells:
@@ -422,6 +453,17 @@ class QualityGate:
                     GateStatus.WARNING,
                     f"{error_cells} سلول خطای فرمول در فایل خوانده شد.",
                     affected=error_cells,
+                )
+            )
+        if read_warnings:
+            status = worst_status([status, GateStatus.WARNING])
+            checks.append(
+                _finding(
+                    "read-warning",
+                    GateStatus.WARNING,
+                    "هنگام خواندن برگه‌ها هشدار ثبت شد.",
+                    affected=len(read_warnings),
+                    evidence={"warnings": read_warnings[:20]},
                 )
             )
         return _stage(
@@ -793,6 +835,15 @@ class QualityGate:
                     "هیچ بررسی کیفیت داده‌ای ثبت نشد.",
                 )
             )
+        legacy = list(getattr(analysis, "validation", []) or [])
+        legacy_failures = [
+            item
+            for item in legacy
+            if status_of(getattr(item, "status", None)) is GateStatus.FAIL
+        ]
+        # The legacy checklist is evidence for this stage. Its structural checks
+        # duplicate the dedicated extraction/block stages and keep their own
+        # thresholds, so they do not override this stage's semantic quality status.
         return _stage(
             GateStage.DATA_QUALITY,
             status,
@@ -801,6 +852,10 @@ class QualityGate:
             evidence={
                 "counts": quality.counts() if hasattr(quality, "counts") else {},
                 "findings": len(findings),
+                "legacy_checks": len(legacy),
+                "legacy_failures": [
+                    str(getattr(item, "code", "") or "") for item in legacy_failures
+                ],
             },
         )
 
@@ -1112,7 +1167,7 @@ class QualityGate:
                     )
                 ],
             )
-        extension = _text(getattr(output_format, "extension", ""))
+        extension = _format_extension(output_format)
         if not getattr(output_format, "supports_generation", True):
             status = GateStatus.FAIL
             checks.append(
@@ -1211,7 +1266,7 @@ class QualityGate:
                 ],
                 evidence={"path": str(path)},
             )
-        output_format = _text(getattr(getattr(generation, "output_format", None), "value", ""))
+        output_format = _format_code(getattr(generation, "output_format", None))
         details: dict[str, Any] = {
             "path": str(path),
             "size_bytes": path.stat().st_size,

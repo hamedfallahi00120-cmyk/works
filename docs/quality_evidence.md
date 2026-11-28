@@ -828,6 +828,10 @@ Branch: `feature/prompt-05a-quality-gate-provenance`, created from `main` at `8f
   unsafe cross-file total is refused rather than summed.
 - `src/local_office_ai/app/coordinator.py`: the console summary prints the gate status,
   stage counts and whether a complete-success/valid-report claim is allowed.
+- `src/local_office_ai/ui/desktop/results.py`, `folder_results.py`, `main_window.py`,
+  `pages/file_analysis.py` and `pages/folder_analysis.py`: a blocked/failed run is shown
+  as «ناموفق — گزارش معتبر نیست» with a danger banner and hint; it is never rendered as
+  an ordinary warning or a completed report.
 - `src/local_office_ai/excel/report_writer.py`: audit profile writes
   «دروازه کیفیت» and «ردیابی منبع (شواهد)»; the clean profile never writes them, but its
   «اعتبارسنجی داده» sheet carries a compact gate summary. `ReportContent` also carries
@@ -847,10 +851,10 @@ Sandbox: Linux, CPython 3.13.15, pytest 9.2.0. Not Windows-target validation.
 
 ```text
 python -m pytest tests/test_quality_gate.py -o addopts="" -q
--> 9 passed in 2.11s (exit 0)
+-> 9 passed in 2.06s (exit 0)
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 358 passed, 2 skipped, 36 deselected in 51.76s (exit 0)
+-> 358 passed, 2 skipped, 36 deselected in 51.24s (exit 0)
 ```
 
 The 36 deselected tests are `requires_sample`; their private workbook is absent and they
@@ -867,7 +871,12 @@ libraries are unavailable in this sandbox.
   returns `completed_with_warnings`.
 - Provenance is built only from validated analysis values and source cells. A derived
   value without a source is a blocking provenance failure; a missing `sheet`, `cell` or
-  `sources` field is reported by name.
+  `sources` field is reported by name. Derived records link their source range and every
+  matching source record; period/unit/label evidence is filled where the workbook
+  provides it. The legacy nine-check `DataValidator` is kept as evidence and its
+  structural checks do not override the dedicated extraction/block stages.
+- A failed or blocked run is shown as a failure in the desktop UI, not as a warning or a
+  completed report.
 - The gate never deletes, repairs or coerces a value. Quality findings and reconciliation
   mismatches remain findings.
 

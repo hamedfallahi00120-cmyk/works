@@ -43,6 +43,8 @@ are merged. Prompt 03A remains on its branch and PR #8.
 - `RunResult.status` is `failed` for a blocking gate failure, `completed` only for a clean
   `PASS` with unchanged input, and `completed_with_warnings` for a warning or non-blocking
   failure. A warning is never presented as complete success.
+- The desktop result/folder pages, banners and composer hints render a failed run as
+  «ناموفق — گزارش معتبر نیست», never as a warning or a completed report.
 - `excel/report_writer.py` — the audit profile writes «دروازه کیفیت» and
   «ردیابی منبع (شواهد)»; the clean profile only shows the compact gate summary in
   «اعتبارسنجی داده». `ReportContent` carries the gate and provenance summary for Word.
@@ -51,10 +53,10 @@ Recorded sandbox evidence (Linux, CPython 3.13.15, pytest 9.2.0):
 
 ```text
 python -m pytest tests/test_quality_gate.py -o addopts="" -q
--> 9 passed in 2.11s
+-> 9 passed in 2.06s
 
 python -m pytest tests -o addopts="" -q -m "not requires_sample"
--> 358 passed, 2 skipped, 36 deselected in 51.76s
+-> 358 passed, 2 skipped, 36 deselected in 51.24s
 ```
 
 The 36 deselected tests are `requires_sample`; their private workbook is absent and they

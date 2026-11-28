@@ -111,6 +111,21 @@ def _block_for(analysis: Any, sheet: str, address: str = "") -> str:
     return str(getattr(blocks[0], "block_id", "")) if blocks else ""
 
 
+def _single_period(periods: Any) -> str:
+    """A period string only when the source names exactly one period."""
+
+    tokens: list[str] = []
+    for item in periods or []:
+        if isinstance(item, dict):
+            token = item.get("token") or item.get("text") or ""
+        else:
+            token = str(item or "")
+        token = str(token).strip()
+        if token:
+            tokens.append(token)
+    return tokens[0] if len(tokens) == 1 else ""
+
+
 def _column_maps(analysis: Any) -> dict[tuple[str, str], dict[str, str]]:
     """Header, unit and period per sheet/column from extraction + semantics."""
 
@@ -118,18 +133,21 @@ def _column_maps(analysis: Any) -> dict[tuple[str, str], dict[str, str]]:
     extraction = getattr(analysis, "extraction", None)
     if extraction is not None:
         for sheet in getattr(extraction, "sheets", []):
+            sheet_period = _single_period(getattr(sheet, "periods", []))
             for block in getattr(sheet, "blocks", []):
+                block_period = _single_period(getattr(block, "periods", []))
                 for column in getattr(block, "columns", []):
                     maps[(sheet.name, column.letter)] = {
                         "header": column.header,
                         "original_header": column.original_header or column.header,
-                        "period": column.period,
+                        "period": column.period or block_period or sheet_period,
                         "block": block.block_id,
                         "unit": "",
                     }
     semantics = getattr(analysis, "semantics", None)
     if semantics is not None:
         for block in getattr(semantics, "blocks", []):
+            block_period = _single_period(getattr(block, "periods", []))
             for field in getattr(block, "columns", []):
                 key = (block.sheet, field.letter)
                 item = maps.setdefault(
@@ -137,13 +155,15 @@ def _column_maps(analysis: Any) -> dict[tuple[str, str], dict[str, str]]:
                     {
                         "header": field.header,
                         "original_header": field.header,
-                        "period": field.period,
+                        "period": field.period or block_period,
                         "block": block.block_id,
                         "unit": "",
                     },
                 )
                 item["unit"] = field.unit or item.get("unit", "")
-                item["period"] = field.period or item.get("period", "")
+                item["period"] = (
+                    field.period or item.get("period", "") or block_period
+                )
                 item["block"] = block.block_id or item.get("block", "")
     return maps
 
@@ -246,6 +266,8 @@ def _calculation_sources(
                 label=info.get("header", ""),
                 original_value=_text(getattr(item, "raw", "")) or cells.value(sheet, address),
                 normalized_value=_text(getattr(item, "raw", "")) or cells.value(sheet, address),
+                period=info.get("period", ""),
+                unit=info.get("unit", ""),
                 formula=getattr(item, "formula", "") or cells.formula(sheet, address),
             )
         )
@@ -280,6 +302,8 @@ def _calculation_sources(
             label=info.get("header", "") or str(getattr(primary, "title", "") or ""),
             original_value=cells.value(sheet, address),
             normalized_value=cells.value(sheet, address),
+            period=info.get("period", ""),
+            unit=info.get("unit", ""),
             formula=cells.formula(sheet, address),
             note="محدوده منبع از جدول اصلی استخراج شد.",
         )
@@ -318,7 +342,8 @@ def _add_calculation_records(
                 original_value=_text(getattr(calculation, "verification_value", ""))
                 or (first.original_value if first else ""),
                 normalized_value=_text(value),
-                unit=str(getattr(calculation, "unit", "") or ""),
+                period=first.period if first else "",
+                unit=str(getattr(calculation, "unit", "") or (first.unit if first else "")),
                 operation=str(getattr(calculation, "method", "") or ""),
                 formula=(first.formula if first else "")
                 or str(getattr(calculation, "method", "") or ""),
@@ -394,6 +419,7 @@ def _add_generic_stat_records(
             if value is None:
                 continue
             header = str(getattr(column, "header", "") or letter)
+            original_header = str(info.get("original_header") or header)
             ledger.add(
                 ProvenanceRecord(
                     key=f"stat.{sheet}.{letter}.{field_name}",
@@ -401,7 +427,7 @@ def _add_generic_stat_records(
                     sheet=sheet,
                     block=info.get("block") or _block_for(analysis, sheet, address),
                     cell=address,
-                    original_label=header,
+                    original_label=original_header,
                     normalized_label=f"{header} - {operation}",
                     original_value=cells.value(sheet, address),
                     normalized_value=_text(value),
@@ -525,7 +551,12 @@ def _add_reconciliation_records(
                 cell=sources[0].cell if sources else "",
                 original_label=label,
                 normalized_label=str(getattr(item, "measure", "") or label),
-                original_value=_text(getattr(item, "expected", None)),
+                original_value=_text(expected)
+                or "، ".join(
+                    source.original_value
+                    for source in sources
+                    if source.original_value
+                )[:500],
                 normalized_value=_text(getattr(item, "calculated", None)),
                 unit=str(getattr(item, "unit", "") or ""),
                 operation=str(getattr(item, "kind_label", "") or getattr(item, "kind", "")),
@@ -571,7 +602,7 @@ def _add_period_records(
                     cell=address,
                     original_label=metric,
                     normalized_label=f"{metric} - {period}",
-                    original_value=_text(declared),
+                    original_value=_text(declared) or cells.value(sheet, address),
                     normalized_value=_text(total),
                     period=period,
                     unit=info.get("unit", ""),
@@ -674,13 +705,17 @@ def _address_overlaps(first: str, second: str) -> bool:
 
 
 def _link_related_records(ledger: ProvenanceLedger) -> None:
-    """Attach source-record keys to derived records that read those cells."""
+    """Attach source-record keys and source addresses to derived records."""
 
     source_records = [item for item in ledger.records if not item.derived]
     for record in ledger.records:
         if not record.derived:
             continue
-        keys: list[str] = []
+        links: set[str] = {
+            f"{source.sheet}!{source.cell}"
+            for source in record.sources
+            if source.sheet and source.cell
+        }
         for source in record.sources:
             for candidate in source_records:
                 if (
@@ -688,8 +723,8 @@ def _link_related_records(ledger: ProvenanceLedger) -> None:
                     and candidate.sheet == source.sheet
                     and _address_overlaps(candidate.cell, source.cell)
                 ):
-                    keys.append(candidate.key)
-        record.related_records = sorted(set(keys))
+                    links.add(candidate.key)
+        record.related_records = sorted(links)
 
 
 def build_provenance_ledger(

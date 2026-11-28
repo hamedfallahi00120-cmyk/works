@@ -111,6 +111,7 @@ def test_complete_provenance_keeps_every_required_field(settings, clean_values_w
     assert record.sources
     assert record.sources[0].cell == "C2:C4"
     assert "12500000" in record.sources[0].original_value
+    assert "داده!C2:C4" in record.related_records
 
     payload = record.to_dict()
     assert {

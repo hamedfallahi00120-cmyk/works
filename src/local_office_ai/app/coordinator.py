@@ -130,7 +130,12 @@ class Coordinator:
                 lines.append("ادعای گزارش معتبر: خیر — شکست مسدودکننده وجود دارد.")
             elif not gate.is_complete_success:
                 lines.append("ادعای موفقیت کامل: خیر — هشدار یا رد ثبت‌شده است.")
-        lines.append(f"وضعیت: {result.status}")
+        status_labels = {
+            "completed": "تکمیل شد",
+            "completed_with_warnings": "با هشدار تکمیل شد",
+            "failed": "ناموفق — گزارش معتبر نیست",
+        }
+        lines.append(f"وضعیت: {status_labels.get(result.status, result.status)}")
         lines.append(f"خروجی: {result.output_path}")
         lines.append(f"لاگ: {self.log_path}")
         if result.errors:
